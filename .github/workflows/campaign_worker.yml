@@ -1,0 +1,106 @@
+name: RPG Campaign Worker
+
+on:
+  schedule:
+    # Executa a cada 5 minutos
+    - cron: '*/5 * * * *'
+  workflow_dispatch:
+
+jobs:
+  process-jobs:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout do código
+        uses: actions/checkout@v4
+
+      - name: Configurar Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Instalar dependências
+        run: pip install -r requirements.txt
+
+      - name: Executar Worker
+        env:
+          REDIS_URL: ${{ secrets.REDIS_URL }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        run: |
+          python - << 'EOF'
+          import os
+          import sys
+          import redis
+          from datetime import datetime
+
+          # Importa a função principal
+          sys.path.append(os.getcwd())
+          from tasks.campaign_tasks import process_campaign_generation
+
+          # Conecta ao Redis
+          REDIS_URL = os.environ['REDIS_URL']
+          conn = redis.from_url(
+              REDIS_URL,
+              ssl_cert_reqs=None,
+              decode_responses=True
+          )
+          print('✅ Conectado ao Redis')
+
+          MAX_JOBS_PER_RUN = 5
+
+          for _ in range(MAX_JOBS_PER_RUN):
+              # 🔐 Pega e REMOVE o job da fila de forma atômica
+              job_id = conn.lpop('rpg:pending_jobs')
+
+              if not job_id:
+                  print('ℹ️ Nenhum job pendente na fila.')
+                  break
+
+              print(f'🔧 Processando job: {job_id}')
+
+              job_key = f'rpg:job:{job_id}'
+
+              try:
+                  job_data = conn.hgetall(job_key)
+
+                  if not job_data:
+                      print(f'⚠️ Job {job_id} não encontrado no Redis.')
+                      continue
+
+                  # Atualiza status para processing
+                  conn.hset(job_key, mapping={
+                      'status': 'processing',
+                      'processed_at': datetime.now().isoformat()
+                  })
+
+                  # Executa a geração da campanha
+                  result = process_campaign_generation(
+                      job_id=job_id,
+                      file_path=job_data['file_path'],
+                      filename=job_data['filename'],
+                      target_language=job_data.get('language', 'pt'),
+                      campaign_complexity=job_data.get('complexity', 'mediana')
+                  )
+
+                  if result:
+                      # Salva resultado
+                      conn.hset(f'{job_key}:result', mapping=result)
+                      conn.hset(job_key, 'status', 'completed')
+                      print(f'✅ Job {job_id} finalizado com sucesso.')
+                  else:
+                      conn.hset(job_key, mapping={
+                          'status': 'failed',
+                          'error': 'Processamento retornou vazio'
+                      })
+                      print(f'❌ Job {job_id} falhou (resultado vazio).')
+
+              except Exception as e:
+                  print(f'🚨 Erro crítico no job {job_id}: {e}')
+                  conn.hset(job_key, mapping={
+                      'status': 'failed',
+                      'error': str(e)
+                  })
+
+          print('🏁 Worker finalizado.')
+          EOF

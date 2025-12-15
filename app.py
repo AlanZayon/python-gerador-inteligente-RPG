@@ -113,99 +113,118 @@ def cleanup_old_files():
 @app.route('/generate-campaign', methods=['POST'])
 @rate_limit(max_calls=5, window=60)
 def generate_campaign():
-    """Endpoint para iniciar geração de campanha (assíncrono)"""
+    """Endpoint para iniciar geração de campanha (assíncrono via Redis)"""
     logger.info("🎲 Recebendo requisição de geração de campanha...")
-    
+
     try:
-        # Validações
+        # =========================
+        # Validações do arquivo
+        # =========================
         if 'file' not in request.files:
             return jsonify({'error': 'Nenhum arquivo enviado'}), 400
 
         file = request.files['file']
+
         if file.filename == '':
             return jsonify({'error': 'Nenhum arquivo selecionado'}), 400
 
         if not file or not allowed_file(file.filename):
             return jsonify({'error': 'Tipo de arquivo não suportado. Use apenas PDF.'}), 400
 
+        # =========================
         # Parâmetros da campanha
+        # =========================
         target_language = request.form.get('target_language', 'pt')
         campaign_complexity = request.form.get('complexity', 'mediana')
-        
+
         if campaign_complexity not in ['simples', 'mediana', 'complexa']:
-            return jsonify({'error': 'Complexidade deve ser: simples, mediana ou complexa'}), 400
+            return jsonify({
+                'error': 'Complexidade deve ser: simples, mediana ou complexa'
+            }), 400
 
-        # Gerar job ID único
+        # =========================
+        # Criar Job
+        # =========================
         job_id = str(uuid.uuid4())
-        logger.info(f"Novo job: {job_id}, Idioma={target_language}, Complexidade={campaign_complexity}")
+        logger.info(
+            f"Novo job criado: {job_id} | Idioma={target_language} | Complexidade={campaign_complexity}"
+        )
 
-        # Salvar arquivo temporariamente
+        # =========================
+        # Salvar arquivo
+        # =========================
         filename = secure_filename(file.filename)
-        input_pdf = os.path.join(app.config['UPLOAD_FOLDER'], f"{job_id}_{filename}")
+        input_pdf = os.path.join(
+            app.config['UPLOAD_FOLDER'],
+            f"{job_id}_{filename}"
+        )
         file.save(input_pdf)
 
-        # Salvar status inicial
-        status_data = {
-            'job_id': job_id,
-            'status': 'queued',
-            'last_updated': datetime.now().isoformat(),
-            'data': {
-                'message': 'Job na fila de processamento',
-                'filename': filename,
-                'language': target_language,
-                'complexity': campaign_complexity
-            }
-        }
-        
-        status_file = os.path.join(app.config['JOB_STATUS_FOLDER'], f'{job_id}.json')
-        with open(status_file, 'w', encoding='utf-8') as f:
-            json.dump(status_data, f, indent=2, ensure_ascii=False)
+        # =========================
+        # Fallback síncrono (sem Redis)
+        # =========================
+        if redis_conn is None:
+            logger.warning("⚠️ Redis indisponível — executando processamento síncrono")
 
-        # Verificar se temos Redis disponível
-        if task_queue is None:
-            # Modo síncrono (fallback sem Redis)
-            logger.warning("Redis não disponível, executando em modo síncrono")
-            result = process_campaign_generation(job_id, input_pdf, filename, target_language, campaign_complexity)
-            
-            if result is None:
+            result = process_campaign_generation(
+                job_id=job_id,
+                file_path=input_pdf,
+                filename=filename,
+                target_language=target_language,
+                campaign_complexity=campaign_complexity
+            )
+
+            if not result:
                 return jsonify({'error': 'Falha ao processar campanha'}), 500
-            
+
             return jsonify({
                 'success': True,
                 'job_id': job_id,
                 'status': 'completed',
-                'campaign_url': result['campaign_url'],
-                'preview': result['preview']
+                'result': result
             }), 200
-        else:
-            # Modo assíncrono com Redis
-            job = task_queue.enqueue(
-                process_campaign_generation,
-                job_id,
-                input_pdf,
-                filename,
-                target_language,
-                campaign_complexity,
-                job_timeout=3600  # 1 hora de timeout
-            )
-            
-            return jsonify({
-                'success': True,
-                'job_id': job_id,
-                'message': 'Processamento iniciado. Use o job_id para verificar o status.',
-                'status_url': f'/job-status/{job_id}',
-                'job_queue_id': job.id
-            }), 202  # 202 Accepted - processamento assíncrono
+
+        # =========================
+        # Modo assíncrono (Redis)
+        # =========================
+        job_key = f"rpg:job:{job_id}"
+
+        redis_conn.hset(job_key, mapping={
+            'job_id': job_id,
+            'file_path': input_pdf,
+            'filename': filename,
+            'language': target_language,
+            'complexity': campaign_complexity,
+            'status': 'queued',
+            'created_at': datetime.now().isoformat()
+        })
+
+        # Enfileirar job (worker usa LPOP)
+        redis_conn.rpush('rpg:pending_jobs', job_id)
+
+        logger.info(f"📥 Job {job_id} adicionado à fila Redis")
+
+        return jsonify({
+            'success': True,
+            'job_id': job_id,
+            'status': 'queued',
+            'message': 'Job adicionado à fila de processamento'
+        }), 202
 
     except Exception as e:
-        logger.error(f"Erro ao iniciar geração de campanha: {e}")
-        # Limpar arquivo se existir
+        logger.error(f"🚨 Erro ao iniciar geração de campanha: {e}")
+
+        # Limpeza do arquivo em caso de erro
         if 'input_pdf' in locals() and os.path.exists(input_pdf):
             try:
                 os.remove(input_pdf)
-            except:
+            except Exception:
                 pass
-        return jsonify({'error': f'Erro ao processar requisição: {str(e)}'}), 500
+
+        return jsonify({
+            'error': f'Erro ao processar requisição: {str(e)}'
+        }), 500
+
 
 @app.route('/job-status/<job_id>', methods=['GET'])
 def get_job_status_endpoint(job_id):
