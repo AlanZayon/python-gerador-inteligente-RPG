@@ -18,10 +18,9 @@ import google.generativeai as genai
 import markdown
 import yaml
 
-
 load_dotenv()
 
-# Configuração de logging
+# Logging configuration
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
@@ -36,28 +35,28 @@ UPLOAD_FOLDER = 'uploads/'
 CAMPAIGN_FOLDER = 'campaigns/'
 ALLOWED_EXTENSIONS = {'pdf'}
 MAX_FILE_SIZE = 50 * 1024 * 1024  # 50MB
-MAX_PAGES = 500  # Aumentado para livros maiores
+MAX_PAGES = 500  # Increased for larger books
 
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 app.config['CAMPAIGN_FOLDER'] = CAMPAIGN_FOLDER
 app.config['MAX_CONTENT_LENGTH'] = MAX_FILE_SIZE
 
-# Configurar Gemini
+# Configure Gemini
 GEMINI_API_KEY = os.getenv('GEMINI_API_KEY')
-GEMINI_CONFIGURED = bool(GEMINI_API_KEY and GEMINI_API_KEY != 'sua_chave_aqui' and len(GEMINI_API_KEY) > 10)
+GEMINI_CONFIGURED = bool(GEMINI_API_KEY and GEMINI_API_KEY != 'your_key_here' and len(GEMINI_API_KEY) > 10)
 
 if GEMINI_CONFIGURED:
     genai.configure(api_key=GEMINI_API_KEY)
-    logger.info("✅ Gemini configurado com sucesso")
+    logger.info("✅ Gemini configured successfully")
 else:
-    logger.warning("❌ Gemini API key não configurada")
+    logger.warning("❌ Gemini API key not configured")
 
-# Criar diretórios se não existirem
+# Create directories if they don't exist
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 os.makedirs(CAMPAIGN_FOLDER, exist_ok=True)
 
 def rate_limit(max_calls=5, window=60):
-    """Decorator para limitar taxa de requisições"""
+    """Decorator to limit request rate"""
     calls = []
     
     def decorator(func):
@@ -67,7 +66,7 @@ def rate_limit(max_calls=5, window=60):
             calls[:] = [call_time for call_time in calls if now - call_time < window]
             
             if len(calls) >= max_calls:
-                return jsonify({'error': 'Muitas requisições. Tente novamente em alguns segundos.'}), 429
+                return jsonify({'error': 'Too many requests. Try again in a few seconds.'}), 429
             
             calls.append(now)
             return func(*args, **kwargs)
@@ -78,46 +77,46 @@ def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
 def validate_pdf(file_path):
-    """Valida se o PDF é processável"""
+    """Validates if PDF is processable"""
     try:
         doc = fitz.open(file_path)
         page_count = len(doc)
         doc.close()
         
         if page_count == 0:
-            return False, "PDF vazio"
+            return False, "Empty PDF"
         if page_count > MAX_PAGES:
-            return False, f"PDF muito grande (máximo {MAX_PAGES} páginas)"
+            return False, f"PDF too large (maximum {MAX_PAGES} pages)"
         
-        logger.info(f"PDF validado: {page_count} páginas")
+        logger.info(f"PDF validated: {page_count} pages")
         return True, "OK"
     except Exception as e:
-        logger.error(f"Erro na validação do PDF: {e}")
-        return False, "PDF corrompido ou ilegível"
+        logger.error(f"Error validating PDF: {e}")
+        return False, "Corrupted or unreadable PDF"
 
 def extract_text_from_pdf(file_path):
-    """Extrai texto completo do PDF"""
+    """Extracts complete text from PDF"""
     try:
         full_text = ""
         with fitz.open(file_path) as doc:
             for page_num in range(len(doc)):
                 page = doc.load_page(page_num)
                 text = page.get_text()
-                full_text += f"\n--- Página {page_num + 1} ---\n{text}"
+                full_text += f"\n--- Page {page_num + 1} ---\n{text}"
         
-        logger.info(f"Texto extraído: {len(full_text)} caracteres")
+        logger.info(f"Text extracted: {len(full_text)} characters")
         return full_text
     except Exception as e:
-        logger.error(f"Erro na extração de texto: {e}")
+        logger.error(f"Error extracting text: {e}")
         return ""
 
 def translate_text(text, target_lang):
-    """Traduz texto usando Google Translator"""
+    """Translates text using Google Translator"""
     try:
         if not text.strip() or len(text.strip()) < 10:
             return text
             
-        # Divide texto em chunks menores para evitar limites da API
+        # Split text into smaller chunks to avoid API limits
         chunks = [text[i:i+4000] for i in range(0, len(text), 4000)]
         translated_chunks = []
         
@@ -127,17 +126,17 @@ def translate_text(text, target_lang):
                 translated_chunks.append(translated)
                 time.sleep(0.5)  # Rate limiting
             except Exception as e:
-                logger.warning(f"Erro ao traduzir chunk: {e}")
-                translated_chunks.append(chunk)  # Mantém original em caso de erro
+                logger.warning(f"Error translating chunk: {e}")
+                translated_chunks.append(chunk)  # Keep original on error
         
         return " ".join(translated_chunks)
         
     except Exception as e:
-        logger.error(f"Erro na tradução: {e}")
+        logger.error(f"Translation error: {e}")
         return text
 
 def analyze_rpg_book_with_gemini(book_text, target_language, campaign_complexity):
-    """Analisa o livro de RPG e gera campanha usando Gemini"""
+    """Analyzes RPG book and generates campaign using Gemini"""
     if not GEMINI_CONFIGURED:
         return generate_fallback_campaign(campaign_complexity, target_language)
     
@@ -145,190 +144,190 @@ def analyze_rpg_book_with_gemini(book_text, target_language, campaign_complexity
         model = genai.GenerativeModel('gemini-2.5-flash-lite')
         
         prompt = f"""
-        VOCÊ É UM MESTRE DE RPG ESPECIALISTA em criar campanhas completas e prontas para jogar.
+        YOU ARE A SPECIALIST RPG GAME MASTER expert in creating complete, ready-to-play campaigns.
 
-        **LIVRO DE RPG FORNECIDO:**
-        {book_text[:15000]}... [texto truncado para análise]
+        **PROVIDED RPG BOOK:**
+        {book_text[:15000]}... [text truncated for analysis]
 
-        **INSTRUÇÕES:**
-        1. Analise o livro de RPG acima e ENTENDA seu sistema, cenário, mecânicas e estilo
-        2. Crie uma campanha **{campaign_complexity.upper()}** na língua: {target_language}
-        3. A campanha deve ser COMPLETA - o mestre deve poder pegar e jogar SEM preparação adicional
+        **INSTRUCTIONS:**
+        1. Analyze the RPG book above and UNDERSTAND its system, setting, mechanics, and style
+        2. Create a **{campaign_complexity.upper()}** campaign in language: {target_language}
+        3. The campaign must be COMPLETE - the game master should be able to pick it up and play WITHOUT additional preparation
 
-        **FORMATO DA CAMPANHA ({campaign_complexity}):**
+        **CAMPAIGN FORMAT ({campaign_complexity}):**
         {get_complexity_guidelines(campaign_complexity)}
 
-        **ESTRUTURA OBRIGATÓRIA:**
+        **MANDATORY STRUCTURE:**
         ```yaml
-        Título: [Título criativo da campanha]
-        Complexidade: {campaign_complexity}
-        Sessões: [número baseado na complexidade]
-        Nível dos Personagens: [intervalo recomendado]
-        Sistema: [baseado no livro analisado]
+        Title: [Creative campaign title]
+        Complexity: {campaign_complexity}
+        Sessions: [number based on complexity]
+        Character Level: [recommended range]
+        System: [based on analyzed book]
         ```
 
-        **CONTEÚDO DETALHADO:**
-        - **VISÃO GERAL**: Resumo envolvente da campanha
-        - **GANCHO INICIAL**: Como começar a primeira sessão
-        - **ARQUETRAMAS DE PERSONAGENS**: Sugestões que se encaixam na campanha
-        - **SESSÕES DETALHADAS**: Cada sessão com objetivos, encontros, NPCs, tesouros
-        - **NPCs IMPORTANTES**: Estatísticas completas ou referências
-        - **INIMIGOS E CRIATURAS**: Encontros balanceados
-        - **RECOMPENSAS E TESOUROS**: Itens mágicos, equipamentos, recompensas
-        - **DESAFIOS E ENIGMAS**: Quebra-cabeças e desafios não-combativos
-        - **FINAIS POSSÍVEIS**: Múltiplos desfechos baseados nas escolhas
-        - **MAPAS E LOCALIZAÇÕES**: Descrições detalhadas ou instruções para criar
+        **DETAILED CONTENT:**
+        - **OVERVIEW**: Engaging campaign summary
+        - **STARTING HOOK**: How to begin the first session
+        - **CHARACTER ARCHETYPES**: Suggestions fitting the campaign
+        - **DETAILED SESSIONS**: Each session with objectives, encounters, NPCs, treasures
+        - **IMPORTANT NPCS**: Complete statistics or references
+        - **ENEMIES AND CREATURES**: Balanced encounters
+        - **REWARDS AND TREASURES**: Magic items, equipment, rewards
+        - **CHALLENGES AND PUZZLES**: Non-combat puzzles and challenges
+        - **POSSIBLE ENDINGS**: Multiple outcomes based on choices
+        - **MAPS AND LOCATIONS**: Detailed descriptions or creation instructions
 
-        **ESTILO:**
-        - Use markdown para formatação
-        - Seja específico e detalhado
-        - Forneça estatísticas ou referências claras ao sistema
-        - Inclua diálogos de NPCs quando relevante
-        - Balanceie combate, exploração e roleplay
+        **STYLE:**
+        - Use markdown for formatting
+        - Be specific and detailed
+        - Provide statistics or clear system references
+        - Include NPC dialogues when relevant
+        - Balance combat, exploration, and roleplay
 
-        Gere a campanha completa em {target_language}:
+        Generate the complete campaign in {target_language}:
         """
 
         response = model.generate_content(prompt)
         campaign_content = response.text
         
-        # Garantir que o conteúdo está na língua correta
-        if target_language != 'pt':
+        # Ensure content is in correct language
+        if target_language != 'en':
             campaign_content = translate_text(campaign_content, target_language)
         
         return format_campaign_output(campaign_content, campaign_complexity, target_language)
         
     except Exception as e:
-        logger.error(f"Erro ao gerar campanha com Gemini: {e}")
+        logger.error(f"Error generating campaign with Gemini: {e}")
         return generate_fallback_campaign(campaign_complexity, target_language)
 
 def get_complexity_guidelines(complexity):
-    """Retorna diretrizes baseadas na complexidade"""
+    """Returns guidelines based on complexity"""
     guidelines = {
-        'simples': """
-        - 1-2 sessões de 3-4 horas cada
-        - História linear e objetiva
-        - 2-3 encontros principais (combate/roleplay)
-        - 1-2 NPCs importantes
-        - 1 localização principal
-        - Resolução direta
+        'simple': """
+        - 1-2 sessions of 3-4 hours each
+        - Linear and objective story
+        - 2-3 main encounters (combat/roleplay)
+        - 1-2 important NPCs
+        - 1 main location
+        - Direct resolution
         """,
-        'mediana': """
-        - 3-4 sessões de 3-4 horas cada  
-        - História com alguns ramos e escolhas
-        - 4-6 encontros diversificados
-        - 3-5 NPCs com personalidades distintas
-        - 2-3 localizações interconectadas
-        - Múltiplas formas de resolver problemas
+        'medium': """
+        - 3-4 sessions of 3-4 hours each  
+        - Story with some branches and choices
+        - 4-6 diverse encounters
+        - 3-5 NPCs with distinct personalities
+        - 2-3 interconnected locations
+        - Multiple problem-solving approaches
         """,
-        'complexa': """
-        - 5+ sessões de 3-4 horas cada
-        - História não-linear com múltiplos arcos
-        - 8+ encontros variados (combate, social, exploração)
-        - 6+ NPCs com motivações complexas
-        - 4+ localizações detalhadas
-        - Sistema de consequências por escolhas
-        - Múltiplos finais possíveis
+        'complex': """
+        - 5+ sessions of 3-4 hours each
+        - Non-linear story with multiple arcs
+        - 8+ varied encounters (combat, social, exploration)
+        - 6+ NPCs with complex motivations
+        - 4+ detailed locations
+        - Consequence system for choices
+        - Multiple possible endings
         """
     }
-    return guidelines.get(complexity, guidelines['mediana'])
+    return guidelines.get(complexity, guidelines['medium'])
 
 def generate_fallback_campaign(complexity, language):
-    """Gera campanha fallback se o Gemini falhar"""
+    """Generates fallback campaign if Gemini fails"""
     base_campaigns = {
-        'simples': {
-            'title': 'A Taverna do Dragão Adormecido',
+        'simple': {
+            'title': 'The Sleeping Dragon Tavern',
             'sessions': 2,
-            'overview': 'Uma taverna isolada esconde um segredo mortal sob seu porão.',
+            'overview': 'An isolated tavern hides a deadly secret beneath its cellar.',
             'content': """
-# A Taverna do Dragão Adormecido
+# The Sleeping Dragon Tavern
 
-## Visão Geral
-Os jogadores chegam à taverna "O Dragão Adormecido" durante uma tempestade. O local parece comum, mas esconde um culto que realiza ritual sob o estabelecimento.
+## Overview
+The players arrive at "The Sleeping Dragon" tavern during a storm. The place seems ordinary, but hides a cult performing rituals beneath the establishment.
 
-## Sessão 1: A Chegada
-**Objetivo**: Investigar os desaparecimentos na taverna
+## Session 1: The Arrival
+**Objective**: Investigate disappearances at the tavern
 
-**Cena 1**: Chegada durante tempestade
-- NPCs: Thorin (dono), Liana (garçonete), Viajantes
-- Evento: Um viajante desaparece durante a noite
+**Scene 1**: Arrival during storm
+- NPCs: Thorin (owner), Liana (waitress), Travelers
+- Event: A traveler disappears during the night
 
-**Cena 2**: Investigação
-- Pistas: Manchas estranhas no porão, símbolos ocultos
-- Encontro: Guardas do culto (2 humanos, 1 feiticeiro)
+**Scene 2**: Investigation
+- Clues: Strange stains in the cellar, hidden symbols
+- Encounter: Cult guards (2 humans, 1 spellcaster)
 
-## Sessão 2: O Ritual
-**Objetivo**: Impedir o ritual de invocação
+## Session 2: The Ritual
+**Objective**: Prevent the summoning ritual
 
-**Cena 1**: Túneis secretos
-- Quebra-cabeça: Símbolos elementais para abrir portas
+**Scene 1**: Secret tunnels
+- Puzzle: Elemental symbols to open doors
 
-**Cena 2**: Salão do ritual
-- Chefe: Líder do culto e acólitos
-- Recompensa: Artefato mágico do dragão
+**Scene 2**: Ritual chamber
+- Boss: Cult leader and acolytes
+- Reward: Dragon magical artifact
 
-## NPCs Principais
-- **Thorin**: Humano guerreiro Nível 3 (aliança possível)
-- **Líder do Culto**: Feiticeiro Nível 4
+## Main NPCs
+- **Thorin**: Human warrior Level 3 (possible alliance)
+- **Cult Leader**: Spellcaster Level 4
 
-## Recompensas
-- 500 PO + Amuleto de Proteção (resistência a magia)
+## Rewards
+- 500 GP + Protection Amulet (magic resistance)
             """
         },
-        'mediana': {
-            'title': 'A Maldição da Floresta Ancestral',
+        'medium': {
+            'title': 'The Curse of the Ancient Forest',
             'sessions': 4,
-            'overview': 'Uma floresta amaldiçoada está se expandindo e corrompendo tudo ao redor.',
+            'overview': 'A cursed forest is expanding and corrupting everything around it.',
             'content': """
-# A Maldição da Floresta Ancestral
+# The Curse of the Ancient Forest
 
-## Visão Geral
-Uma floresta ancestral começou a se expandir magicamente, corrompendo terras vizinhas. Os jogadores devem descobrir a fonte da maldição.
+## Overview
+An ancient forest has begun magically expanding, corrupting nearby lands. The players must discover the source of the curse.
 
-## Sessão 1: Vila na Fronteira
-**Objetivo**: Investigar a expansão florestal
+## Session 1: Frontier Village
+**Objective**: Investigate forest expansion
 
-**Cena 1**: Vila de Oakhaven
-- NPCs: Prefeito preocupado, Druida recluso
-- Missões: Resgatar desaparecidos, coletar amostras
+**Scene 1**: Oakhaven village
+- NPCs: Worried mayor, Reclusive druid
+- Quests: Rescue missing people, collect samples
 
-**Cena 2**: Orla da floresta
-- Encontro: Criaturas corrompidas (lobos, ursos)
+**Scene 2**: Forest edge
+- Encounter: Corrupted creatures (wolves, bears)
 
-## Sessão 2: Coração da Floresta
-**Objetivo**: Encontrar o druida ancião
+## Session 2: Heart of the Forest
+**Objective**: Find the elder druid
 
-**Cena 1**: Navegação perigosa
-- Desafios: Labirinto natural, plantas carnívoras
+**Scene 1**: Dangerous navigation
+- Challenges: Natural maze, carnivorous plants
 
-**Cena 2**: Clareira do druida
-- NPC: Elowen (druida Nível 5), revela origem da maldição
+**Scene 2**: Druid clearing
+- NPC: Elowen (druid Level 5), reveals curse origin
 
-## Sessão 3: Templo Esquecido
-**Objetivo**: Recuperar artefato purificador
+## Session 3: Forgotten Temple
+**Objective**: Retrieve purification artifact
 
-**Cena 1**: Ruínas submersas
-- Quebra-cabeça: Alinhamento celestial
+**Scene 1**: Submerged ruins
+- Puzzle: Celestial alignment
 
-**Cena 2**: Guardiões do templo
-- Combate: Elementais da natureza
+**Scene 2**: Temple guardians
+- Combat: Nature elementals
 
-## Sessão 4: Confronto Final
-**Objetivo**: Purificar a fonte da corrupção
+## Session 4: Final Confrontation
+**Objective**: Purify corruption source
 
-**Cena 1**: Nascente corrompida
-- Chefe: Espírito Corrompido (CR 6)
-- Recompensas: Tesouro druídico
+**Scene 1**: Corrupted spring
+- Boss: Corrupted Spirit (CR 6)
+- Rewards: Druidic treasure
 
-## Desenvolvimento de Personagem
-Sugestões de arquetipagem: Ranger da floresta, Druida, Clérigo da natureza
+## Character Development
+Archetype suggestions: Forest ranger, Druid, Nature cleric
             """
         }
     }
     
-    campaign = base_campaigns.get(complexity, base_campaigns['mediana'])
+    campaign = base_campaigns.get(complexity, base_campaigns['medium'])
     
-    if language != 'pt':
+    if language != 'en':
         campaign['content'] = translate_text(campaign['content'], language)
         campaign['title'] = translate_text(campaign['title'], language)
         campaign['overview'] = translate_text(campaign['overview'], language)
@@ -336,17 +335,17 @@ Sugestões de arquetipagem: Ranger da floresta, Druida, Clérigo da natureza
     return format_campaign_output(campaign['content'], complexity, language, campaign['title'])
 
 def format_campaign_output(content, complexity, language, title=None):
-    """Formata a saída da campanha de forma padronizada"""
+    """Formats campaign output in standardized way"""
     
-    session_counts = {'simples': '1-2', 'mediana': '3-4', 'complexa': '5+'}
+    session_counts = {'simple': '1-2', 'medium': '3-4', 'complex': '5+'}
     
     formatted = f"""
-# 🎲 CAMPANHA DE RPG - {complexity.upper()}
+# 🎲 RPG CAMPAIGN - {complexity.upper()}
 {'#' if not title else f'# {title}'}
-**Duração**: {session_counts.get(complexity, '3-4')} sessões  
-**Idioma**: {language}  
-**Gerado em**: {datetime.now().strftime('%d/%m/%Y %H:%M')}  
-**Complexidade**: {complexity.capitalize()}
+**Duration**: {session_counts.get(complexity, '3-4')} sessions  
+**Language**: {language}  
+**Generated on**: {datetime.now().strftime('%d/%m/%Y %H:%M')}  
+**Complexity**: {complexity.capitalize()}
 
 ---
 
@@ -354,13 +353,13 @@ def format_campaign_output(content, complexity, language, title=None):
 
 ---
 
-*Campanha gerada automaticamente a partir de análise de livro de RPG.  
-Balanceamento pode precisar de ajustes para seu grupo específico.*
+*Campaign automatically generated from RPG book analysis.  
+Balancing may need adjustments for your specific group.*
 """
     return formatted
 
 def save_campaign_to_file(campaign_content, filename, language):
-    """Salva campanha em arquivo markdown"""
+    """Saves campaign to markdown file"""
     try:
         safe_filename = secure_filename(filename)
         campaign_file = f"campaign_{safe_filename}_{int(time.time())}.md"
@@ -369,66 +368,66 @@ def save_campaign_to_file(campaign_content, filename, language):
         with open(campaign_path, 'w', encoding='utf-8') as f:
             f.write(campaign_content)
         
-        logger.info(f"Campanha salva: {campaign_path}")
+        logger.info(f"Campaign saved: {campaign_path}")
         return campaign_file
     except Exception as e:
-        logger.error(f"Erro ao salvar campanha: {e}")
+        logger.error(f"Error saving campaign: {e}")
         return None
 
 @app.route('/generate-campaign', methods=['POST'])
-@rate_limit(max_calls=3, window=60)  # 3 campanhas por minuto
+@rate_limit(max_calls=3, window=60)  # 3 campaigns per minute
 def generate_campaign():
-    """Endpoint principal para gerar campanhas de RPG"""
-    logger.info("🎲 Recebendo requisição de geração de campanha...")
+    """Main endpoint to generate RPG campaigns"""
+    logger.info("🎲 Receiving campaign generation request...")
     
     try:
-        # Validações
+        # Validations
         if 'file' not in request.files:
-            return jsonify({'error': 'Nenhum arquivo enviado'}), 400
+            return jsonify({'error': 'No file uploaded'}), 400
 
         file = request.files['file']
         if file.filename == '':
-            return jsonify({'error': 'Nenhum arquivo selecionado'}), 400
+            return jsonify({'error': 'No file selected'}), 400
 
         if not file or not allowed_file(file.filename):
-            return jsonify({'error': 'Tipo de arquivo não suportado. Use apenas PDF.'}), 400
+            return jsonify({'error': 'File type not supported. Use PDF only.'}), 400
 
-        # Parâmetros da campanha
-        target_language = request.form.get('target_language', 'pt')
-        campaign_complexity = request.form.get('complexity', 'mediana')
+        # Campaign parameters
+        target_language = request.form.get('target_language', 'en')
+        campaign_complexity = request.form.get('complexity', 'medium')
         
-        if campaign_complexity not in ['simples', 'mediana', 'complexa']:
-            return jsonify({'error': 'Complexidade deve ser: simples, mediana ou complexa'}), 400
+        if campaign_complexity not in ['simple', 'medium', 'complex']:
+            return jsonify({'error': 'Complexity must be: simple, medium, or complex'}), 400
 
-        logger.info(f"Parâmetros: Idioma={target_language}, Complexidade={campaign_complexity}")
+        logger.info(f"Parameters: Language={target_language}, Complexity={campaign_complexity}")
 
-        # Salvar arquivo
+        # Save file
         filename = secure_filename(file.filename)
         input_pdf = os.path.join(app.config['UPLOAD_FOLDER'], filename)
         file.save(input_pdf)
 
-        # Validar PDF
+        # Validate PDF
         is_valid, validation_msg = validate_pdf(input_pdf)
         if not is_valid:
             os.remove(input_pdf)
             return jsonify({'error': validation_msg}), 400
 
-        # Processar
-        logger.info("Extraindo texto do livro de RPG...")
+        # Process
+        logger.info("Extracting text from RPG book...")
         book_text = extract_text_from_pdf(input_pdf)
         
         if not book_text or len(book_text.strip()) < 100:
             os.remove(input_pdf)
-            return jsonify({'error': 'Texto insuficiente extraído do PDF. O arquivo pode ser digitalizado como imagem.'}), 400
+            return jsonify({'error': 'Insufficient text extracted from PDF. File may be image-scanned.'}), 400
 
-        logger.info("Analisando livro e gerando campanha...")
+        logger.info("Analyzing book and generating campaign...")
         campaign_content = analyze_rpg_book_with_gemini(book_text, target_language, campaign_complexity)
 
-        # Salvar campanha
+        # Save campaign
         base_name = os.path.splitext(filename)[0]
         campaign_filename = save_campaign_to_file(campaign_content, base_name, target_language)
 
-        # Limpar arquivo temporário
+        # Clean temporary file
         try:
             os.remove(input_pdf)
         except:
@@ -438,67 +437,67 @@ def generate_campaign():
             return jsonify({
                 'success': True,
                 'campaign_url': f'/download-campaign/{campaign_filename}',
-                'message': f'Campanha {campaign_complexity} gerada com sucesso!',
+                'message': f'{campaign_complexity.capitalize()} campaign generated successfully!',
                 'preview': campaign_content[:500] + '...' if len(campaign_content) > 500 else campaign_content
             }), 200
         else:
-            return jsonify({'error': 'Erro ao salvar campanha'}), 500
+            return jsonify({'error': 'Error saving campaign'}), 500
 
     except Exception as e:
-        logger.error(f"Erro na geração de campanha: {e}")
-        # Limpar arquivo se existir
+        logger.error(f"Error generating campaign: {e}")
+        # Clean file if exists
         if 'input_pdf' in locals() and os.path.exists(input_pdf):
             try:
                 os.remove(input_pdf)
             except:
                 pass
-        return jsonify({'error': f'Erro ao processar arquivo: {str(e)}'}), 500
+        return jsonify({'error': f'Error processing file: {str(e)}'}), 500
 
 @app.route('/download-campaign/<filename>')
 def download_campaign(filename):
-    """Download da campanha gerada"""
+    """Download generated campaign"""
     try:
         return send_from_directory(app.config['CAMPAIGN_FOLDER'], filename, 
                                  as_attachment=True, 
-                                 download_name=f"campanha_rpg_{filename}")
+                                 download_name=f"rpg_campaign_{filename}")
     except Exception as e:
-        logger.error(f"Erro no download da campanha: {e}")
-        return jsonify({'error': 'Campanha não encontrada'}), 404
+        logger.error(f"Error downloading campaign: {e}")
+        return jsonify({'error': 'Campaign not found'}), 404
 
 @app.route('/campaign-complexities', methods=['GET'])
 def get_campaign_complexities():
-    """Retorna complexidades de campanha disponíveis"""
+    """Returns available campaign complexities"""
     complexities = {
-        'simples': {
-            'name': 'Campanha Simples',
-            'sessions': '1-2 sessões',
-            'description': 'História direta e objetiva, perfeita para oneshots ou introduções',
-            'duration': '3-8 horas totais',
-            'focus': 'Combate e objetivos claros'
+        'simple': {
+            'name': 'Simple Campaign',
+            'sessions': '1-2 sessions',
+            'description': 'Direct and objective story, perfect for oneshots or introductions',
+            'duration': '3-8 hours total',
+            'focus': 'Combat and clear objectives'
         },
-        'mediana': {
-            'name': 'Campanha Mediana', 
-            'sessions': '3-4 sessões',
-            'description': 'Equilíbrio entre combate, exploração e desenvolvimento',
-            'duration': '9-16 horas totais',
-            'focus': 'História com ramificações e escolhas'
+        'medium': {
+            'name': 'Medium Campaign', 
+            'sessions': '3-4 sessions',
+            'description': 'Balance between combat, exploration and character development',
+            'duration': '9-16 hours total',
+            'focus': 'Story with branches and choices'
         },
-        'complexa': {
-            'name': 'Campanha Complexa',
-            'sessions': '5+ sessões',
-            'description': 'Arco épico com múltiplos caminhos e consequências',
-            'duration': '17+ horas totais', 
-            'focus': 'Narrativa profunda e desenvolvimento de personagem'
+        'complex': {
+            'name': 'Complex Campaign',
+            'sessions': '5+ sessions',
+            'description': 'Epic arc with multiple paths and consequences',
+            'duration': '17+ hours total', 
+            'focus': 'Deep narrative and character development'
         }
     }
     return jsonify(complexities)
 
 @app.route('/supported-languages', methods=['GET'])
 def get_supported_languages():
-    """Retorna idiomas suportados para campanhas"""
+    """Returns supported languages for campaigns"""
     languages = {
-        'pt': 'Português',
-        'en': 'English', 
+        'en': 'English',
+        'pt': 'Português', 
         'es': 'Español',
         'fr': 'Français',
         'de': 'Deutsch',
@@ -512,7 +511,7 @@ def get_supported_languages():
 
 @app.route('/status', methods=['GET'])
 def get_status():
-    """Status da API"""
+    """API status"""
     return jsonify({
         'status': 'online',
         'service': 'RPG Campaign Generator',
@@ -523,10 +522,10 @@ def get_status():
 
 @app.route('/example-campaign', methods=['GET'])
 def get_example_campaign():
-    """Retorna um exemplo de campanha sem precisar de upload"""
+    """Returns a campaign example without upload"""
     try:
-        complexity = request.args.get('complexity', 'mediana')
-        language = request.args.get('language', 'pt')
+        complexity = request.args.get('complexity', 'medium')
+        language = request.args.get('language', 'en')
         
         example = generate_fallback_campaign(complexity, language)
         
@@ -535,15 +534,15 @@ def get_example_campaign():
             'complexity': complexity,
             'language': language,
             'content': example,
-            'message': 'Exemplo de campanha gerado'
+            'message': 'Example campaign generated'
         })
         
     except Exception as e:
-        logger.error(f"Erro ao gerar exemplo: {e}")
-        return jsonify({'error': 'Erro ao gerar exemplo'}), 500
+        logger.error(f"Error generating example: {e}")
+        return jsonify({'error': 'Error generating example'}), 500
 
 def cleanup_old_files():
-    """Remove arquivos antigos (mais de 24 horas)"""
+    """Removes old files (older than 24 hours)"""
     try:
         now = time.time()
         for folder in [UPLOAD_FOLDER, CAMPAIGN_FOLDER]:
@@ -551,23 +550,23 @@ def cleanup_old_files():
                 for filename in os.listdir(folder):
                     file_path = os.path.join(folder, filename)
                     if os.path.isfile(file_path):
-                        if now - os.path.getmtime(file_path) > 86400:  # 24 horas
+                        if now - os.path.getmtime(file_path) > 86400:  # 24 hours
                             os.remove(file_path)
-                            logger.info(f"Arquivo antigo removido: {file_path}")
+                            logger.info(f"Old file removed: {file_path}")
     except Exception as e:
-        logger.warning(f"Erro na limpeza: {e}")
+        logger.warning(f"Cleanup error: {e}")
 
 if __name__ == '__main__':
     cleanup_old_files()
-    logger.info("🚀 Servidor iniciado - Gerador de Campanhas de RPG")
+    logger.info("🚀 Server started - RPG Campaign Generator")
     print("""
     🎲 RPG CAMPAIGN GENERATOR 🎲
     ===========================
-    Serviço: Transformação de livros de RPG em campanhas prontas
+    Service: Transforming RPG books into ready-to-play campaigns
     Endpoints:
-    - POST /generate-campaign   → Gera campanha a partir de PDF
-    - GET  /example-campaign    → Exemplo sem upload
-    - GET  /campaign-complexities → Tipos de campanha
-    - GET  /supported-languages → Idiomas disponíveis
+    - POST /generate-campaign   → Generate campaign from PDF
+    - GET  /example-campaign    → Example without upload
+    - GET  /campaign-complexities → Campaign types
+    - GET  /supported-languages → Available languages
     """)
     app.run(host='0.0.0.0', port=5000, debug=False)
