@@ -2,6 +2,7 @@ from flask import Flask, request, jsonify, send_from_directory
 from flask_cors import CORS
 from werkzeug.utils import secure_filename
 from dotenv import load_dotenv
+import requests
 import os
 import logging
 import time
@@ -55,6 +56,41 @@ except redis.ConnectionError as e:
 except Exception as e:
     logger.warning(f"❌ Erro ao conectar ao Redis: {e}")
     task_queue = None
+
+def trigger_worker():
+    owner = os.getenv("GITHUB_REPO_OWNER")
+    repo = os.getenv("GITHUB_REPO_NAME")
+    workflow = os.getenv("GITHUB_WORKFLOW_FILE", "campaign_worker.yml")
+    branch = os.getenv("GITHUB_BRANCH", "main")
+    token = os.getenv("GITHUB_TOKEN")
+
+    if not all([owner, repo, workflow, token]):
+        logger.warning("⚠️ Variáveis de ambiente do GitHub não configuradas")
+        return
+
+    url = (
+        f"https://api.github.com/repos/"
+        f"{owner}/{repo}/"
+        f"actions/workflows/{workflow}/dispatches"
+    )
+
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Accept": "application/vnd.github+json"
+    }
+
+    payload = {"ref": branch}
+
+    response = requests.post(url, headers=headers, json=payload)
+
+    if response.status_code not in (200, 204):
+        logger.error(
+            f"❌ Falha ao disparar worker: "
+            f"{response.status_code} - {response.text}"
+        )
+        response.raise_for_status()
+
+    logger.info("🚀 Worker do GitHub Actions disparado com sucesso")
 
 # Criar diretórios se não existirem
 for folder in [UPLOAD_FOLDER, CAMPAIGN_FOLDER, JOB_STATUS_FOLDER]:
@@ -203,6 +239,13 @@ def generate_campaign():
         redis_conn.rpush('rpg:pending_jobs', job_id)
 
         logger.info(f"📥 Job {job_id} adicionado à fila Redis")
+
+        # 🚀 DISPARA O WORKER IMEDIATAMENTE
+        try:
+            trigger_worker()
+            logger.info("🚀 Workflow do worker disparado")
+        except Exception as e:
+            logger.error(f"⚠️ Falha ao disparar worker: {e}")
 
         return jsonify({
             'success': True,
