@@ -1,25 +1,36 @@
-# Ambiente virtual do Python
-venv/
-venv-detectron/
-
-# Arquivos de cache do Python
+# Python
 __pycache__/
-*.pyc
-*.pyo
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+.venv/
+ENV/
+env.bak/
+venv.bak/
 
-# Logs e arquivos temporários
-*.log
-*.tmp
-
-# Configurações locais
-.env
-.env.local
-
-# Dependências instaladas localmente
-*.sqlite3
-instance/
-
-# IDEs e editores (VS Code, PyCharm, etc.)
+# IDE
 .vscode/
 .idea/
 *.swp
+*.swo
+
+# Environment
+.env
+.env.production
+.env.local
+
+# Uploads
+uploads/
+campaigns/
+job_status/
+
+# Logs
+*.log
+logs/
+
+# System
+.DS_Store
+Thumbs.db
