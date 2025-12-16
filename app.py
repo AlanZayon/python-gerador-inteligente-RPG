@@ -213,29 +213,29 @@ def generate_campaign():
         # =========================
         # Fallback síncrono (sem Redis)
         # =========================
-        if redis_conn is None:
-            logger.warning("⚠️ Redis indisponível — executando processamento síncrono")
+        # if redis_conn is None:
+        #     logger.warning("⚠️ Redis indisponível — executando processamento síncrono")
 
-            file_url = upload_result["file_url"]
+        #     file_url = upload_result["file_url"]
 
 
-            result = process_campaign_generation(
-                job_id=job_id,
-                file_url=file_url,
-                filename=filename,
-                target_language=target_language,
-                campaign_complexity=campaign_complexity
-            )
+        #     result = process_campaign_generation(
+        #         job_id=job_id,
+        #         file_url=file_url,
+        #         filename=filename,
+        #         target_language=target_language,
+        #         campaign_complexity=campaign_complexity
+        #     )
 
-            if not result:
-                return jsonify({'error': 'Falha ao processar campanha'}), 500
+        #     if not result:
+        #         return jsonify({'error': 'Falha ao processar campanha'}), 500
 
-            return jsonify({
-                'success': True,
-                'job_id': job_id,
-                'status': 'completed',
-                'result': result
-            }), 200
+        #     return jsonify({
+        #         'success': True,
+        #         'job_id': job_id,
+        #         'status': 'completed',
+        #         'result': result
+        #     }), 200
 
         # =========================
         # Modo assíncrono (Redis)
