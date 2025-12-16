@@ -70,20 +70,13 @@ jobs:
                   # =========================
                   file_url = job_data['file_url']
                   filename = job_data['filename']
-                  local_path = os.path.join(TEMP_DIR, f"{job_id}_{filename}")
-
-                  r = requests.get(file_url, timeout=30)
-                  r.raise_for_status()
-
-                  with open(local_path, 'wb') as f:
-                      f.write(r.content)
 
                   # =========================
                   # Processamento
                   # =========================
                   result = process_campaign_generation(
                       job_id=job_id,
-                      file_path=local_path,
+                      file_url=file_url,
                       filename=filename,
                       target_language=job_data.get('language', 'pt'),
                       campaign_complexity=job_data.get('complexity', 'mediana')
