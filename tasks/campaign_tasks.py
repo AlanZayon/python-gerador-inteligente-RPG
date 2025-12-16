@@ -20,9 +20,12 @@ from urllib.parse import urlparse
 # Carregar variáveis de ambiente
 load_dotenv()
 
-from services.s3_storage import upload_pdf_to_s3, upload_content_to_s3
+from services.s3_storage import upload_content_to_s3
 
-
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
 logger = logging.getLogger(__name__)
 
 # Configurações
@@ -424,14 +427,16 @@ def process_campaign_generation(job_id, file_url, filename, target_language, cam
         
         # 5. Salvar campanha no S3
         save_job_status(job_id, 'processing', {'progress': 'Salvando campanha gerada no S3...'})
-        s3_key, file_url = save_campaign_to_s3(campaign_content, filename)
-        
+        upload_result = save_campaign_to_s3(campaign_content, filename)
+
+        s3_key = upload_result['s3_key']
+        campaign_url = upload_result['file_url']        
         # 6. Limpar arquivo temporário
         cleanup_temp_files(local_file_path)
         
         if s3_key:
             result = {
-                'campaign_url': file_url,  # URL pré-assinada do S3
+                'campaign_url': campaign_url,  # URL pré-assinada do S3
                 's3_key': s3_key,  # S3 Key para referência futura
                 'preview': campaign_content[:500] + '...' if len(campaign_content) > 500 else campaign_content,
                 'file_size': len(campaign_content)  # Tamanho do conteúdo da campanha
