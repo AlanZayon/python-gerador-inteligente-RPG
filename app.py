@@ -317,39 +317,38 @@ def generate_campaign():
 
 @app.route('/job-status/<job_id>', methods=['GET'])
 def get_job_status_endpoint(job_id):
-    """Endpoint para verificar status do job"""
     status_data = get_job_status(job_id)
-    
+
     if not status_data:
         return jsonify({'error': 'Job não encontrado'}), 404
 
-    # Garantir que status e last_updated existam
     job_status = status_data.get('status', 'unknown')
-    last_updated = status_data.get('last_updated') or status_data.get('processed_at') or status_data.get('created_at')
+    last_updated = (
+        status_data.get('last_updated')
+        or status_data.get('processed_at')
+        or status_data.get('created_at')
+    )
 
     response = {
         'job_id': job_id,
         'status': job_status,
-        'last_updated': last_updated
+        'last_updated': last_updated,
+        'result': status_data.get('data') 
     }
-
-    # Incluir dados adicionais baseados no status
-    if status_data.get('data'):
-        response.update(status_data['data'])
 
     return jsonify(response)
 
 
-@app.route('/download-campaign/<filename>')
-def download_campaign(filename):
-    """Download da campanha gerada"""
-    try:
-        # A URL pré-assinada para o arquivo do S3
-        presigned_url = f"https://{S3_BUCKET_NAME}.s3.{AWS_REGION}.amazonaws.com/{filename}"
-        return jsonify({'download_url': presigned_url}), 200
-    except Exception as e:
-        logger.error(f"Erro no download da campanha: {e}")
-        return jsonify({'error': 'Campanha não encontrada'}), 404
+# @app.route('/download-campaign/<filename>')
+# def download_campaign(filename):
+#     """Download da campanha gerada"""
+#     try:
+#         # A URL pré-assinada para o arquivo do S3
+#         presigned_url = f"https://{S3_BUCKET_NAME}.s3.{AWS_REGION}.amazonaws.com/{filename}"
+#         return jsonify({'download_url': presigned_url}), 200
+#     except Exception as e:
+#         logger.error(f"Erro no download da campanha: {e}")
+#         return jsonify({'error': 'Campanha não encontrada'}), 404
 
 @app.route('/campaign-complexities', methods=['GET'])
 def get_campaign_complexities():
