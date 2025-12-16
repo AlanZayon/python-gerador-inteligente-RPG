@@ -20,6 +20,9 @@ from urllib.parse import urlparse
 # Carregar variáveis de ambiente
 load_dotenv()
 
+from services.s3_storage import upload_pdf_to_s3, upload_content_to_s3
+
+
 logger = logging.getLogger(__name__)
 
 # Configurações
@@ -346,26 +349,12 @@ Balanceamento pode precisar de ajustes para seu grupo específico.*
 """
     return formatted
 
-def save_campaign_to_file(campaign_content, original_filename, language):
-    """Salva campanha em arquivo markdown"""
-    try:
-        os.makedirs(CAMPAIGN_FOLDER, exist_ok=True)
-        
-        # Criar nome seguro para o arquivo
-        base_name = os.path.splitext(secure_filename(original_filename))[0]
-        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-        campaign_file = f"campaign_{base_name}_{timestamp}.md"
-        campaign_path = os.path.join(CAMPAIGN_FOLDER, campaign_file)
-        
-        with open(campaign_path, 'w', encoding='utf-8') as f:
-            f.write(campaign_content)
-        
-        logger.info(f"Campanha salva: {campaign_path}")
-        return campaign_file, campaign_path
-        
-    except Exception as e:
-        logger.error(f"Erro ao salvar campanha: {e}")
-        return None, None
+def save_campaign_to_s3(campaign_content, original_filename):
+    base_name = os.path.splitext(secure_filename(original_filename))[0]
+    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    campaign_filename = f"campaign_{base_name}_{timestamp}.md"
+    
+    return upload_content_to_s3(campaign_content, campaign_filename)
 
 def get_complexity_guidelines(complexity):
     """Retorna diretrizes baseadas na complexidade"""
@@ -433,26 +422,25 @@ def process_campaign_generation(job_id, file_url, filename, target_language, cam
         save_job_status(job_id, 'processing', {'progress': 'Gerando campanha com IA...'})
         campaign_content = analyze_rpg_book_with_gemini(book_text, target_language, campaign_complexity)
         
-        # 5. Salvar campanha
-        save_job_status(job_id, 'processing', {'progress': 'Salvando campanha gerada...'})
-        campaign_filename, campaign_path = save_campaign_to_file(campaign_content, filename, target_language)
+        # 5. Salvar campanha no S3
+        save_job_status(job_id, 'processing', {'progress': 'Salvando campanha gerada no S3...'})
+        s3_key, file_url = save_campaign_to_s3(campaign_content, filename)
         
         # 6. Limpar arquivo temporário
         cleanup_temp_files(local_file_path)
         
-        if campaign_filename:
+        if s3_key:
             result = {
-                'campaign_url': f'/download-campaign/{campaign_filename}',
-                'campaign_filename': campaign_filename,
-                'campaign_path': campaign_path,
+                'campaign_url': file_url,  # URL pré-assinada do S3
+                's3_key': s3_key,  # S3 Key para referência futura
                 'preview': campaign_content[:500] + '...' if len(campaign_content) > 500 else campaign_content,
-                'file_size': os.path.getsize(campaign_path) if os.path.exists(campaign_path) else 0
+                'file_size': len(campaign_content)  # Tamanho do conteúdo da campanha
             }
             save_job_status(job_id, 'completed', result)
             logger.info(f"✅ Job {job_id} concluído com sucesso")
             return result
         else:
-            save_job_status(job_id, 'failed', {'error': 'Erro ao salvar campanha'})
+            save_job_status(job_id, 'failed', {'error': 'Erro ao salvar campanha no S3'})
             return None
             
     except Exception as e:

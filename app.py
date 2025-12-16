@@ -27,6 +27,11 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# AWS S3 Configuration
+S3_BUCKET_NAME = os.getenv('S3_BUCKET_NAME')
+AWS_REGION = os.getenv('AWS_REGION', 'us-east-1')
+GEMINI_CONFIGURED = os.getenv('GEMINI_API_KEY') is not None
+
 app = Flask(__name__)
 CORS(app, origins=["http://localhost:5173", "https://pdf-translate-vue.vercel.app"])
 
@@ -122,26 +127,38 @@ def rate_limit(max_calls=10, window=60):
 
 def get_job_status(job_id):
     job_key = f"rpg:job:{job_id}"
-    status_data = redis_conn.hgetall(job_key)
-    
-    # Adicione um log para inspecionar o que é retornado
-    logger.debug(f"Status Data for {job_id}: {status_data}")
-    
-    if not status_data:
+    try:
+        raw_data = redis_conn.hgetall(job_key)
+        logger.debug(f"Consultando Redis key={job_key}: {raw_data}")
+
+        if not raw_data:
+            logger.error(f"Job {job_id} não encontrado no Redis.")
+            return None
+
+        # Converter bytes para string
+        status_data = {k.decode() if isinstance(k, bytes) else k:
+                       v.decode() if isinstance(v, bytes) else v
+                       for k, v in raw_data.items()}
+
+        if 'status' not in status_data:
+            logger.error(
+                f"Status missing for job {job_id}. Chaves retornadas: {list(status_data.keys())}, valores: {status_data}"
+            )
+            return None
+
+        # Se houver resultado salvo em hash separado
+        result_raw = redis_conn.hgetall(f"{job_key}:result")
+        if result_raw:
+            result_data = {k.decode() if isinstance(k, bytes) else k:
+                           v.decode() if isinstance(v, bytes) else v
+                           for k, v in result_raw.items()}
+            status_data['data'] = result_data
+
+        return status_data
+
+    except Exception as e:
+        logger.exception(f"Erro ao buscar status do job {job_id}: {e}")
         return None
-    
-    if 'status' not in status_data:
-        logger.error(f"Status missing for job {job_id}")
-        return None
-
-    # Se houver resultado salvo em hash separado
-    result_data = redis_conn.hgetall(f"{job_key}:result")
-    if result_data:
-        status_data['data'] = result_data
-
-    return status_data
-
-
 
 def cleanup_old_files():
     """Remove arquivos antigos (mais de 24 horas)"""
@@ -305,26 +322,31 @@ def get_job_status_endpoint(job_id):
     
     if not status_data:
         return jsonify({'error': 'Job não encontrado'}), 404
-    
+
+    # Garantir que status e last_updated existam
+    job_status = status_data.get('status', 'unknown')
+    last_updated = status_data.get('last_updated') or status_data.get('processed_at') or status_data.get('created_at')
+
     response = {
         'job_id': job_id,
-        'status': status_data['status'],
-        'last_updated': status_data['last_updated']
+        'status': job_status,
+        'last_updated': last_updated
     }
-    
+
     # Incluir dados adicionais baseados no status
     if status_data.get('data'):
         response.update(status_data['data'])
-    
+
     return jsonify(response)
+
 
 @app.route('/download-campaign/<filename>')
 def download_campaign(filename):
     """Download da campanha gerada"""
     try:
-        return send_from_directory(app.config['CAMPAIGN_FOLDER'], filename, 
-                                 as_attachment=True, 
-                                 download_name=f"campanha_rpg_{filename}")
+        # A URL pré-assinada para o arquivo do S3
+        presigned_url = f"https://{S3_BUCKET_NAME}.s3.{AWS_REGION}.amazonaws.com/{filename}"
+        return jsonify({'download_url': presigned_url}), 200
     except Exception as e:
         logger.error(f"Erro no download da campanha: {e}")
         return jsonify({'error': 'Campanha não encontrada'}), 404
