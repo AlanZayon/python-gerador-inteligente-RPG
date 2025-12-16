@@ -215,6 +215,9 @@ def generate_campaign():
         if redis_conn is None:
             logger.warning("⚠️ Redis indisponível — executando processamento síncrono")
 
+            file_url = upload_result["file_url"]
+
+
             result = process_campaign_generation(
                 job_id=job_id,
                 file_url=file_url,

@@ -1,12 +1,13 @@
-# tasks/campaign_tasks.py
 """
 Módulo de tarefas para processamento assíncrono de campanhas
-As funções aqui serão executadas pelos workers RQ
+ATUALIZADO para trabalhar com arquivos S3
 """
 
 import os
 import logging
 import time
+import tempfile
+import requests
 import fitz  # PyMuPDF
 from deep_translator import GoogleTranslator
 import google.generativeai as genai
@@ -14,6 +15,7 @@ from datetime import datetime
 from werkzeug.utils import secure_filename
 import json
 from dotenv import load_dotenv
+from urllib.parse import urlparse
 
 # Carregar variáveis de ambiente
 load_dotenv()
@@ -21,7 +23,6 @@ load_dotenv()
 logger = logging.getLogger(__name__)
 
 # Configurações
-UPLOAD_FOLDER = 'uploads/'
 CAMPAIGN_FOLDER = 'campaigns/'
 JOB_STATUS_FOLDER = 'job_status/'
 
@@ -35,6 +36,7 @@ if GEMINI_CONFIGURED:
 def save_job_status(job_id, status, data=None):
     """Salva o status do job em arquivo JSON"""
     try:
+        os.makedirs(JOB_STATUS_FOLDER, exist_ok=True)
         status_file = os.path.join(JOB_STATUS_FOLDER, f'{job_id}.json')
         status_data = {
             'job_id': job_id,
@@ -48,6 +50,53 @@ def save_job_status(job_id, status, data=None):
     except Exception as e:
         logger.error(f"Erro ao salvar status do job {job_id}: {e}")
         return False
+
+def download_file_from_s3(file_url, job_id):
+    """Baixa arquivo do S3 para um arquivo temporário"""
+    try:
+        # Criar diretório temporário específico para o job
+        temp_dir = os.path.join(tempfile.gettempdir(), f"rpg_job_{job_id}")
+        os.makedirs(temp_dir, exist_ok=True)
+        
+        # Extrair nome do arquivo da URL
+        parsed_url = urlparse(file_url)
+        filename = os.path.basename(parsed_url.path)
+        
+        # Definir caminho local
+        local_path = os.path.join(temp_dir, secure_filename(filename))
+        
+        logger.info(f"Baixando arquivo do S3: {file_url} para {local_path}")
+        
+        # Download do arquivo
+        response = requests.get(file_url, stream=True, timeout=60)
+        response.raise_for_status()
+        
+        with open(local_path, 'wb') as f:
+            for chunk in response.iter_content(chunk_size=8192):
+                f.write(chunk)
+        
+        logger.info(f"Download concluído: {local_path} ({os.path.getsize(local_path)} bytes)")
+        return local_path
+        
+    except Exception as e:
+        logger.error(f"Erro ao baixar arquivo do S3: {e}")
+        raise
+
+def cleanup_temp_files(file_path):
+    """Limpa arquivos temporários"""
+    try:
+        if file_path and os.path.exists(file_path):
+            # Remover arquivo
+            os.remove(file_path)
+            
+            # Tentar remover diretório pai se estiver vazio
+            parent_dir = os.path.dirname(file_path)
+            if os.path.exists(parent_dir) and not os.listdir(parent_dir):
+                os.rmdir(parent_dir)
+                
+            logger.info(f"Arquivos temporários limpos: {file_path}")
+    except Exception as e:
+        logger.warning(f"Erro ao limpar arquivos temporários: {e}")
 
 def validate_pdf(file_path):
     """Valida se o PDF é processável"""
@@ -297,21 +346,26 @@ Balanceamento pode precisar de ajustes para seu grupo específico.*
 """
     return formatted
 
-def save_campaign_to_file(campaign_content, filename, language):
+def save_campaign_to_file(campaign_content, original_filename, language):
     """Salva campanha em arquivo markdown"""
     try:
-        safe_filename = secure_filename(filename)
-        campaign_file = f"campaign_{safe_filename}_{int(time.time())}.md"
+        os.makedirs(CAMPAIGN_FOLDER, exist_ok=True)
+        
+        # Criar nome seguro para o arquivo
+        base_name = os.path.splitext(secure_filename(original_filename))[0]
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        campaign_file = f"campaign_{base_name}_{timestamp}.md"
         campaign_path = os.path.join(CAMPAIGN_FOLDER, campaign_file)
         
         with open(campaign_path, 'w', encoding='utf-8') as f:
             f.write(campaign_content)
         
         logger.info(f"Campanha salva: {campaign_path}")
-        return campaign_file
+        return campaign_file, campaign_path
+        
     except Exception as e:
         logger.error(f"Erro ao salvar campanha: {e}")
-        return None
+        return None, None
 
 def get_complexity_guidelines(complexity):
     """Retorna diretrizes baseadas na complexidade"""
@@ -344,55 +398,55 @@ def get_complexity_guidelines(complexity):
     }
     return guidelines.get(complexity, guidelines['mediana'])
 
-def process_campaign_generation(job_id, file_path, filename, target_language, campaign_complexity):
-    """Função que será executada em background pelo worker RQ"""
+def process_campaign_generation(job_id, file_url, filename, target_language, campaign_complexity):
+    """
+    Função principal para processar geração de campanha a partir de arquivo S3
+    """
     logger.info(f"🎲 Iniciando processamento do job {job_id}")
+    local_file_path = None
     
     try:
         # Atualizar status para processando
-        save_job_status(job_id, 'processing', {'progress': 'Validando PDF...'})
+        save_job_status(job_id, 'processing', {'progress': 'Baixando arquivo do S3...'})
         
-        # Validar PDF
-        is_valid, validation_msg = validate_pdf(file_path)
+        # 1. Baixar arquivo do S3
+        local_file_path = download_file_from_s3(file_url, job_id)
+        
+        # 2. Validar PDF
+        save_job_status(job_id, 'processing', {'progress': 'Validando PDF...'})
+        is_valid, validation_msg = validate_pdf(local_file_path)
         if not is_valid:
             save_job_status(job_id, 'failed', {'error': validation_msg})
-            try:
-                os.remove(file_path)
-            except:
-                pass
+            cleanup_temp_files(local_file_path)
             return None
         
-        # Extrair texto
+        # 3. Extrair texto
         save_job_status(job_id, 'processing', {'progress': 'Extraindo texto do PDF...'})
-        book_text = extract_text_from_pdf(file_path)
+        book_text = extract_text_from_pdf(local_file_path)
         
         if not book_text or len(book_text.strip()) < 100:
             save_job_status(job_id, 'failed', {'error': 'Texto insuficiente extraído do PDF.'})
-            try:
-                os.remove(file_path)
-            except:
-                pass
+            cleanup_temp_files(local_file_path)
             return None
         
-        # Gerar campanha
+        # 4. Gerar campanha
         save_job_status(job_id, 'processing', {'progress': 'Gerando campanha com IA...'})
         campaign_content = analyze_rpg_book_with_gemini(book_text, target_language, campaign_complexity)
         
-        # Salvar campanha
-        base_name = os.path.splitext(filename)[0]
-        campaign_filename = save_campaign_to_file(campaign_content, base_name, target_language)
+        # 5. Salvar campanha
+        save_job_status(job_id, 'processing', {'progress': 'Salvando campanha gerada...'})
+        campaign_filename, campaign_path = save_campaign_to_file(campaign_content, filename, target_language)
         
-        # Limpar arquivo temporário
-        try:
-            os.remove(file_path)
-        except:
-            pass
+        # 6. Limpar arquivo temporário
+        cleanup_temp_files(local_file_path)
         
         if campaign_filename:
             result = {
                 'campaign_url': f'/download-campaign/{campaign_filename}',
                 'campaign_filename': campaign_filename,
-                'preview': campaign_content[:500] + '...' if len(campaign_content) > 500 else campaign_content
+                'campaign_path': campaign_path,
+                'preview': campaign_content[:500] + '...' if len(campaign_content) > 500 else campaign_content,
+                'file_size': os.path.getsize(campaign_path) if os.path.exists(campaign_path) else 0
             }
             save_job_status(job_id, 'completed', result)
             logger.info(f"✅ Job {job_id} concluído com sucesso")
@@ -405,10 +459,6 @@ def process_campaign_generation(job_id, file_path, filename, target_language, ca
         logger.error(f"Erro no processamento do job {job_id}: {e}")
         save_job_status(job_id, 'failed', {'error': str(e)})
         
-        # Limpar arquivo se existir
-        if 'file_path' in locals() and os.path.exists(file_path):
-            try:
-                os.remove(file_path)
-            except:
-                pass
+        # Limpar arquivo temporário em caso de erro
+        cleanup_temp_files(local_file_path if 'local_file_path' in locals() else None)
         return None
