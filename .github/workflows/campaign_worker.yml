@@ -82,8 +82,6 @@ jobs:
                       campaign_complexity=job_data.get('complexity', 'mediana')
                   )
 
-                  os.remove(local_path)
-
                   if result:
                       conn.hset(f'{job_key}:result', mapping=result)
                       conn.hset(job_key, 'status', 'completed')
