@@ -29,24 +29,21 @@ jobs:
           import os
           import sys
           import redis
+          import requests
           from datetime import datetime
 
-          # Importa a função principal
           sys.path.append(os.getcwd())
           from tasks.campaign_tasks import process_campaign_generation
 
-          # Conecta ao Redis
           REDIS_URL = os.environ['REDIS_URL']
-          conn = redis.from_url(
-              REDIS_URL,
-              decode_responses=True
-          )
+          conn = redis.from_url(REDIS_URL, decode_responses=True)
+
           print('✅ Conectado ao Redis')
 
           MAX_JOBS_PER_RUN = 5
+          TEMP_DIR = '/tmp'
 
           for _ in range(MAX_JOBS_PER_RUN):
-              # 🔐 Pega e REMOVE o job da fila de forma atômica
               job_id = conn.lpop('rpg:pending_jobs')
 
               if not job_id:
@@ -54,45 +51,59 @@ jobs:
                   break
 
               print(f'🔧 Processando job: {job_id}')
-
               job_key = f'rpg:job:{job_id}'
 
               try:
                   job_data = conn.hgetall(job_key)
 
                   if not job_data:
-                      print(f'⚠️ Job {job_id} não encontrado no Redis.')
+                      print(f'⚠️ Job {job_id} não encontrado.')
                       continue
 
-                  # Atualiza status para processing
                   conn.hset(job_key, mapping={
                       'status': 'processing',
-                      'processed_at': datetime.now().isoformat()
+                      'processed_at': datetime.utcnow().isoformat()
                   })
 
-                  # Executa a geração da campanha
+                  # =========================
+                  # Download do PDF (S3)
+                  # =========================
+                  file_url = job_data['file_url']
+                  filename = job_data['filename']
+                  local_path = os.path.join(TEMP_DIR, f"{job_id}_{filename}")
+
+                  r = requests.get(file_url, timeout=30)
+                  r.raise_for_status()
+
+                  with open(local_path, 'wb') as f:
+                      f.write(r.content)
+
+                  # =========================
+                  # Processamento
+                  # =========================
                   result = process_campaign_generation(
                       job_id=job_id,
-                      file_path=job_data['file_path'],
-                      filename=job_data['filename'],
+                      file_path=local_path,
+                      filename=filename,
                       target_language=job_data.get('language', 'pt'),
                       campaign_complexity=job_data.get('complexity', 'mediana')
                   )
 
+                  os.remove(local_path)
+
                   if result:
-                      # Salva resultado
                       conn.hset(f'{job_key}:result', mapping=result)
                       conn.hset(job_key, 'status', 'completed')
-                      print(f'✅ Job {job_id} finalizado com sucesso.')
+                      print(f'✅ Job {job_id} finalizado.')
                   else:
                       conn.hset(job_key, mapping={
                           'status': 'failed',
-                          'error': 'Processamento retornou vazio'
+                          'error': 'Resultado vazio'
                       })
-                      print(f'❌ Job {job_id} falhou (resultado vazio).')
+                      print(f'❌ Job {job_id} falhou.')
 
               except Exception as e:
-                  print(f'🚨 Erro crítico no job {job_id}: {e}')
+                  print(f'🚨 Erro no job {job_id}: {e}')
                   conn.hset(job_key, mapping={
                       'status': 'failed',
                       'error': str(e)

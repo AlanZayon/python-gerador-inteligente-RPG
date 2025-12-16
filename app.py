@@ -15,6 +15,8 @@ from datetime import datetime
 
 # IMPORTE A FUNÇÃO DO MÓDULO DE TAREFAS
 from tasks.campaign_tasks import process_campaign_generation
+from services.s3_storage import upload_pdf_to_s3
+
 
 load_dotenv()
 
@@ -149,8 +151,10 @@ def cleanup_old_files():
 @app.route('/generate-campaign', methods=['POST'])
 @rate_limit(max_calls=5, window=60)
 def generate_campaign():
-    """Endpoint para iniciar geração de campanha (assíncrono via Redis)"""
+    """Endpoint para iniciar geração de campanha (assíncrono via Redis + S3)"""
     logger.info("🎲 Recebendo requisição de geração de campanha...")
+
+    input_pdf = None
 
     try:
         # =========================
@@ -164,7 +168,7 @@ def generate_campaign():
         if file.filename == '':
             return jsonify({'error': 'Nenhum arquivo selecionado'}), 400
 
-        if not file or not allowed_file(file.filename):
+        if not allowed_file(file.filename):
             return jsonify({'error': 'Tipo de arquivo não suportado. Use apenas PDF.'}), 400
 
         # =========================
@@ -187,7 +191,7 @@ def generate_campaign():
         )
 
         # =========================
-        # Salvar arquivo
+        # Salvar arquivo TEMPORÁRIO
         # =========================
         filename = secure_filename(file.filename)
         input_pdf = os.path.join(
@@ -197,6 +201,15 @@ def generate_campaign():
         file.save(input_pdf)
 
         # =========================
+        # Upload para S3
+        # =========================
+        file_url = upload_pdf_to_s3(input_pdf, filename)
+
+        # Remove o arquivo local após upload
+        os.remove(input_pdf)
+        input_pdf = None
+
+        # =========================
         # Fallback síncrono (sem Redis)
         # =========================
         if redis_conn is None:
@@ -204,7 +217,7 @@ def generate_campaign():
 
             result = process_campaign_generation(
                 job_id=job_id,
-                file_path=input_pdf,
+                file_url=file_url,
                 filename=filename,
                 target_language=target_language,
                 campaign_complexity=campaign_complexity
@@ -227,20 +240,22 @@ def generate_campaign():
 
         redis_conn.hset(job_key, mapping={
             'job_id': job_id,
-            'file_path': input_pdf,
+            'file_url': file_url,
             'filename': filename,
             'language': target_language,
             'complexity': campaign_complexity,
             'status': 'queued',
-            'created_at': datetime.now().isoformat()
+            'created_at': datetime.utcnow().isoformat()
         })
 
-        # Enfileirar job (worker usa LPOP)
+        # Enfileirar job
         redis_conn.rpush('rpg:pending_jobs', job_id)
 
         logger.info(f"📥 Job {job_id} adicionado à fila Redis")
 
-        # 🚀 DISPARA O WORKER IMEDIATAMENTE
+        # =========================
+        # Disparar worker (GitHub Actions)
+        # =========================
         try:
             trigger_worker()
             logger.info("🚀 Workflow do worker disparado")
@@ -257,8 +272,7 @@ def generate_campaign():
     except Exception as e:
         logger.error(f"🚨 Erro ao iniciar geração de campanha: {e}")
 
-        # Limpeza do arquivo em caso de erro
-        if 'input_pdf' in locals() and os.path.exists(input_pdf):
+        if input_pdf and os.path.exists(input_pdf):
             try:
                 os.remove(input_pdf)
             except Exception:
