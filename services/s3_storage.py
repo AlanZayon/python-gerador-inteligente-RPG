@@ -11,14 +11,30 @@ s3 = boto3.client(
 
 BUCKET = os.environ["S3_BUCKET_NAME"]
 
-def upload_pdf_to_s3(local_path, filename):
+
+def upload_pdf_to_s3(local_path: str, filename: str) -> dict:
+    """
+    Faz upload do PDF para o S3 e retorna key + URL pré-assinada
+    """
     s3_key = f"campaign-inputs/{uuid4()}_{filename}"
 
     s3.upload_file(
-        local_path,
-        BUCKET,
-        s3_key,
+        Filename=local_path,
+        Bucket=BUCKET,
+        Key=s3_key,
         ExtraArgs={"ContentType": "application/pdf"}
     )
 
-    return f"https://{BUCKET}.s3.amazonaws.com/{s3_key}"
+    presigned_url = s3.generate_presigned_url(
+        ClientMethod="get_object",
+        Params={
+            "Bucket": BUCKET,
+            "Key": s3_key
+        },
+        ExpiresIn=3600  # 1 hora
+    )
+
+    return {
+        "s3_key": s3_key,
+        "file_url": presigned_url
+    }

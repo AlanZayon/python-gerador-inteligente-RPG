@@ -203,7 +203,7 @@ def generate_campaign():
         # =========================
         # Upload para S3
         # =========================
-        file_url = upload_pdf_to_s3(input_pdf, filename)
+        upload_result = upload_pdf_to_s3(input_pdf, filename)
 
         # Remove o arquivo local após upload
         os.remove(input_pdf)
@@ -239,13 +239,14 @@ def generate_campaign():
         job_key = f"rpg:job:{job_id}"
 
         redis_conn.hset(job_key, mapping={
-            'job_id': job_id,
-            'file_url': file_url,
-            'filename': filename,
-            'language': target_language,
-            'complexity': campaign_complexity,
-            'status': 'queued',
-            'created_at': datetime.utcnow().isoformat()
+            "job_id": job_id,
+            "file_url": upload_result["file_url"],
+            "s3_key": upload_result["s3_key"],
+            "filename": filename,
+            "language": target_language,
+            "complexity": campaign_complexity,
+            "status": "queued",
+            "created_at": datetime.utcnow().isoformat()
         })
 
         # Enfileirar job
