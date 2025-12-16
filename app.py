@@ -121,16 +121,17 @@ def rate_limit(max_calls=10, window=60):
     return decorator
 
 def get_job_status(job_id):
-    """Obtém o status do job do arquivo JSON"""
-    try:
-        status_file = os.path.join(app.config['JOB_STATUS_FOLDER'], f'{job_id}.json')
-        if os.path.exists(status_file):
-            with open(status_file, 'r', encoding='utf-8') as f:
-                return json.load(f)
+    job_key = f"rpg:job:{job_id}"
+    status_data = redis_conn.hgetall(job_key)
+    if not status_data:
         return None
-    except Exception as e:
-        logger.error(f"Erro ao ler status do job {job_id}: {e}")
-        return None
+    
+    # Se houver resultado salvo em hash separado
+    result_data = redis_conn.hgetall(f"{job_key}:result")
+    if result_data:
+        status_data['data'] = result_data
+    return status_data
+
 
 def cleanup_old_files():
     """Remove arquivos antigos (mais de 24 horas)"""
