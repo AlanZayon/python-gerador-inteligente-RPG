@@ -123,14 +123,24 @@ def rate_limit(max_calls=10, window=60):
 def get_job_status(job_id):
     job_key = f"rpg:job:{job_id}"
     status_data = redis_conn.hgetall(job_key)
+    
+    # Adicione um log para inspecionar o que é retornado
+    logger.debug(f"Status Data for {job_id}: {status_data}")
+    
     if not status_data:
         return None
     
+    if 'status' not in status_data:
+        logger.error(f"Status missing for job {job_id}")
+        return None
+
     # Se houver resultado salvo em hash separado
     result_data = redis_conn.hgetall(f"{job_key}:result")
     if result_data:
         status_data['data'] = result_data
+
     return status_data
+
 
 
 def cleanup_old_files():
