@@ -1,125 +1,165 @@
-# Gerador Inteligente de RPG - API
+RPG Campaign Generator API
 
-API para geração, organização e gestão de conteúdo de RPG (campanhas, personagens, regras e resumos) usando inteligência artificial. O serviço expõe endpoints HTTP para iniciar tarefas assíncronas de criação/expansão de campanhas, acompanhar status de jobs e acessar artefatos gerados (resumos, bases de conhecimento, planilhas de personagem, etc.).
+An API that transforms RPG books (PDF) into ready-to-play campaigns using AI. It accepts a PDF upload, extracts and analyzes content, optionally uses Google Gemini to generate a complete campaign, and stores the generated campaign in Amazon S3. Processing is asynchronous, orchestrated via Redis/RQ and a worker.
 
-## Principais recursos
-- Geração de conteúdo de campanha (ganchos, tramas, NPCs, locais) com IA
-- Processamento assíncrono via filas (web dyno + worker)
-- Consulta ao status de jobs e resultados processados
-- Organização de arquivos por tipos: campaigns/, summaries/, knowledge_base/, character_sheets/, game_rules/
-- Upload e processamento de arquivos de apoio (textos, PDFs transcritos, etc.)
-- Observabilidade básica por logs
+Key capabilities
+- Upload a PDF (RPG rulebook, module, or setting) and generate a full campaign.
+- Asynchronous job orchestration using Redis and a background worker.
+- Campaigns saved to S3 as Markdown with a pre-signed URL for download.
+- Fallback campaign generation without Gemini for local/dev usage.
+- CORS enabled for a separate frontend (local and Vercel domain are preconfigured).
+- Rate limiting to protect the API.
 
-## Estrutura do projeto
-- app.py: aplicação web (endpoints HTTP)
-- worker.py: consumidor de fila e executor das tarefas de IA
-- tasks/: tarefas de campanha (campaign_tasks.py) e auxiliares
-- campaigns/: saídas de campanhas geradas
-- summaries/: resumos gerados
-- knowledge_base/: base de conhecimento consolidada
-- character_sheets/: planilhas de personagens
-- game_rules/: regras e sistemas
-- uploads/: arquivos enviados para processamento
-- job_status/: metadados e progresso de jobs
-- cache/, processed/, translated/: artefatos intermediários
+Repository layout
+- app.py — Flask API with endpoints for campaign generation, job status, and reference info.
+- tasks/campaign_tasks.py — Core pipeline: download from S3, validate/extract text, AI analysis, save campaign to S3, and report job status.
+- services/s3_storage.py — S3 helpers to upload source PDFs and generated Markdown campaigns and return pre-signed URLs.
+- worker.py — Redis/RQ worker process.
+- .github/workflows/campaign_worker.yml — Optional GitHub Actions workflow that can be triggered to run the worker remotely.
+- campaigns/, job_status/, uploads/ — Local directories created on startup (used for dev/debug; main storage is S3).
+- Other folders (summaries/, knowledge_base/, character_sheets/, game_rules/, cache/, processed/, translated/, accessible/, observability/) are reserved for derived artifacts and future features.
 
-## Requisitos
-- Python 3.10+
-- Dependências do arquivo requirements.txt
-- Variáveis de ambiente configuradas (.env) para chaves de IA/filas (ex.: OpenAI, Redis ou similar) e configurações da aplicação
+How it works
+1) Client uploads a PDF to POST /generate-campaign with optional parameters language and complexity.
+2) API validates the file, streams it to S3, and enqueues a job id in Redis.
+3) A worker (local RQ worker or a remote runner via GitHub Actions) pulls the job, downloads the PDF from the pre-signed S3 URL, extracts text, and generates a campaign:
+   - If GEMINI_API_KEY is configured, it uses Google Gemini (gemini-2.5-flash-lite).
+   - Otherwise it falls back to a built-in template-based generator.
+4) The generated campaign is saved back to S3 as Markdown and the job status is updated with a pre-signed URL.
+5) The client polls GET /job-status/<job_id> until status is completed.
 
-## Instalação e execução local
-1. Crie e ative um ambiente virtual:
-   - python -m venv .venv
-   - source .venv/bin/activate
-2. Instale dependências:
-   - pip install -r requirements.txt
-3. Configure variáveis de ambiente no arquivo .env (ver seção Configuração)
-4. Inicie a API web:
-   - python app.py
-5. Em um processo separado, inicie o worker:
-   - python worker.py
-
-A API ficará disponível por padrão em http://localhost:8000 (ou conforme definido em app.py). O worker processa as tarefas em background.
-
-## Configuração (.env)
-Exemplos de variáveis comuns (ajuste aos nomes efetivamente usados no projeto):
-- GEMINI_API_KEY=... (provedor de IA)
-- REDIS_URL=... (Ex.: Redis/CloudAMQP)
-- MAX_FILE_SIZE=52428800
-- MAX_PAGES=500
-
-
-## Endpoints (visão geral)
-Observação: Os caminhos e payloads exatos podem variar conforme implementação em app.py e tasks/campaign_tasks.py. Esta seção descreve o fluxo típico.
-
-- POST /campaigns
-  - Inicia a geração/expansão de uma campanha
-  - Body (JSON, exemplo):
+API endpoints
+- POST /generate-campaign
+  - Multipart form-data: file (required, PDF), target_language (default: pt), complexity (simples|mediana|complexa; default: mediana)
+  - Response 202:
     {
-      "title": "Sombras de Valendor",
-      "system": "D&D 5e",
-      "tone": "Dark fantasy",
-      "inputs": ["briefing inicial", "história de mundo", "lista de NPCs"],
-      "language": "pt-BR"
+      "success": true,
+      "job_id": "<uuid>",
+      "status": "queued",
+      "message": "Job adicionado à fila de processamento"
     }
-  - Resposta: { "job_id": "<id>" }
 
-- GET /jobs/<job_id>
-  - Retorna status do job e, quando concluído, caminhos/links para artefatos gerados
-  - Exemplo de resposta:
+- GET /job-status/<job_id>
+  - Returns status and (when completed) the result stored by the worker:
     {
-      "status": "completed",
-      "outputs": {
-        "campaign_path": "campaigns/valendor/",
-        "summary": "summaries/valendor.md"
+      "job_id": "<uuid>",
+      "status": "completed|processing|failed|queued",
+      "last_updated": "<iso>",
+      "result": {
+        "campaign_url": "<S3 pre-signed URL>",
+        "s3_key": "campaigns/campaign_...md",
+        "preview": "First chars...",
+        "file_size": 12345
       }
     }
 
-- GET /campaigns/<id>
-  - Retorna metadados da campanha e links para arquivos organizados (NPCs, locais, ganchos, etc.)
+- GET /campaign-complexities
+  - Returns metadata describing the available complexities (simples, mediana, complexa).
 
-- POST /uploads
-  - Faz upload de arquivos de referência para enriquecer a geração
-  - Resposta inclui referência para uso posterior nas tasks
+- GET /supported-languages
+  - Returns a map of language codes to human-readable names.
 
-- GET /health
-  - Sinalização simples de saúde do serviço
+- GET /status
+  - Health and basic service information. Includes queue info when Redis is connected.
 
+- GET /example-campaign
+  - Generates a local example without file upload using the fallback generator.
+  - Query params: complexity (default: mediana), language (default: pt)
 
-## Fluxo de uso recomendado
-1. Envie materiais de referência (opcional) via /uploads
-2. Chame POST /campaigns com o briefing e preferências do sistema/estilo
-3. Receba job_id e acompanhe em GET /jobs/<job_id>
-4. Ao finalizar, acesse os arquivos organizados em campaigns/, summaries/ e demais pastas
+Campaign output format
+- Markdown file with a standardized header and sections. When the worker uses Gemini, the content is detailed and structured; when Gemini is unavailable, a well-formed fallback campaign is produced.
+- The final artifact is stored on S3 with content-type text/markdown and returned as a pre-signed URL.
 
-## Formato dos resultados
-- Campaigns: diretórios com textos da campanha, capítulos, NPCs, locais, itens
-- Summaries: arquivos .md com resumos de sessões e visão geral
-- Knowledge base: notas unificadas, glosários, timelines
-- Character sheets: fichas em JSON/Markdown conforme sistema
-- Game rules: referências e adaptações de regras
+Architecture overview
+- Flask API (app.py)
+  - Validates upload, rate-limits, and initiates async processing.
+  - Uploads source PDF to S3 with a content-type application/pdf.
+  - Writes a job record to Redis (rpg:pending_jobs queue + rpg:job:<id> hash) and optionally triggers a GitHub Actions workflow to run the worker.
+- Worker (worker.py + tasks/campaign_tasks.py)
+  - Downloads the PDF from the pre-signed S3 URL.
+  - Validates the PDF (page count limits) and extracts text with PyMuPDF (fitz).
+  - If GEMINI_API_KEY is configured, invokes Google Generative AI; otherwise uses a built-in fallback generator.
+  - Stores the resulting Markdown on S3 and writes the completed status to a JSON file under job_status/ (dev) and/or Redis (if integrated).
+- S3 integration (services/s3_storage.py)
+  - Two functions: upload_pdf_to_s3 and upload_content_to_s3.
+  - Returns both the S3 key and a one-hour pre-signed URL.
 
-## Execução em produção
-- Procfile indica processos web e worker para plataformas compatíveis (ex.: Heroku, Railway)
-- Defina variáveis de ambiente seguras e volumes/persistência de arquivos
-- Garanta que web e worker compartilhem o mesmo backend de fila/armazenamento
+Prerequisites
+- Python 3.10+
+- Redis (local or managed) accessible by both the API and the worker.
+- AWS S3 bucket and credentials.
+- Optional: Google Gemini API key for higher-quality campaign generation.
 
-## Observabilidade
-- Logs estruturados em app e worker (stdout/stderr)
-- job_status/ mantém progresso e metadados
-- Integre métricas/APM conforme necessidade
+Installation (local)
+1) Create and activate a virtualenv
+   - python -m venv venv
+   - source venv/bin/activate
+2) Install dependencies
+   - pip install -r requirements.txt
+3) Configure environment variables in .env (see below)
+4) Start the API
+   - python app.py
+5) Start the worker in another terminal
+   - python worker.py
 
-## Boas práticas e limites
-- Valide entradas e tamanho de prompts
-- Respeite limites de tokens/custos do provedor de IA
-- Faça versionamento dos artefatos de campanha
-- Evite subir ao repositório arquivos com dados sensíveis ou pesados; use .gitignore
+Environment variables (.env)
+Required for S3
+- AWS_ACCESS_KEY_ID
+- AWS_SECRET_ACCESS_KEY
+- AWS_REGION (e.g., us-east-1)
+- S3_BUCKET_NAME
 
-## Desenvolvimento
-- tasks/campaign_tasks.py concentra as rotinas principais de geração
-- Teste localmente com payloads pequenos e evolua para cenários maiores
-- Adapte prompts, templates e estrutura de saída conforme seu sistema de RPG
+Redis / Queue
+- REDIS_URL (default: redis://localhost:6379/0)
 
-## Licença
-Defina a licença do projeto (MIT, Apache-2.0, etc.) conforme sua preferência.
+AI (optional)
+- GEMINI_API_KEY (enables Google Generative AI)
+
+CORS / Frontend triggers (optional)
+- The API is configured to allow http://localhost:5173 and https://pdf-translate-vue.vercel.app by default.
+
+GitHub Actions (optional remote worker)
+- GITHUB_REPO_OWNER
+- GITHUB_REPO_NAME
+- GITHUB_WORKFLOW_FILE (default: campaign_worker.yml)
+- GITHUB_BRANCH (default: main)
+- GITHUB_TOKEN
+
+Running with Gunicorn (production hint)
+- A simple Procfile is included. Example command:
+  - web: gunicorn app:app --bind 0.0.0.0:5000 --workers 2
+  - worker: python worker.py
+- Ensure the API and worker can both reach the same Redis and S3.
+
+Request examples
+- curl upload (Portuguese, medium complexity)
+  curl -X POST http://localhost:5000/generate-campaign \
+    -F "file=@/path/to/book.pdf" \
+    -F "target_language=pt" \
+    -F "complexity=mediana"
+
+- Polling job status
+  curl http://localhost:5000/job-status/<job_id>
+
+Notes and limits
+- Allowed file type: PDF; max size defaults to 50 MB (see app.py MAX_CONTENT_LENGTH).
+- PDF page limit: 500 (enforced in tasks/campaign_tasks.py).
+- Pre-signed S3 URLs currently expire in 1 hour.
+- If Redis is unavailable, the code contains a commented synchronous fallback for development; primary mode is asynchronous with Redis.
+
+Troubleshooting
+- Redis not available
+  - The API logs a warning and still returns a queued response if configured with Redis-only mode. Ensure REDIS_URL is reachable and that a worker is running.
+- S3 upload issues
+  - Verify AWS credentials, region, and S3 bucket name. Check IAM permissions for s3:PutObject, s3:GetObject, and s3:GeneratePresignedUrl.
+- Gemini errors or low-quality output
+  - Ensure GEMINI_API_KEY is valid. If omitted, the fallback generator will be used.
+- CORS / frontend issues
+  - Update the allowed origins in app.py if your frontend runs on a different domain/port.
+
+Security
+- Do not commit secrets. Use a .env file or platform secrets management.
+- Consider increasing rate limits and adding authentication if exposing the API publicly.
+
+License
+MIT
