@@ -9,6 +9,7 @@ import time
 import tempfile
 import requests
 import fitz  # PyMuPDF
+import re
 from deep_translator import GoogleTranslator
 import google.generativeai as genai
 from datetime import datetime
@@ -138,24 +139,47 @@ def extract_text_from_pdf(file_path):
         logger.error(f"Erro na extração de texto: {e}")
         return ""
 
+def translate_h3_titles(text, target_lang):
+    def replace(match):
+        title = match.group(1)
+
+        try:
+            translated = GoogleTranslator(
+                source='auto',
+                target=target_lang
+            ).translate(title)
+            time.sleep(0.3)
+        except Exception:
+            translated = title
+
+        return f"### {translated}"
+
+    return re.sub(r'^###\s+(.*)$', replace, text, flags=re.MULTILINE)
+
 def translate_text(text, target_lang):
     """Traduz texto usando Google Translator"""
     try:
         if not text.strip() or len(text.strip()) < 10:
             return text
-            
+
+        # 🔹 1. Traduz apenas títulos ###
+        text = translate_h3_titles(text, target_lang)
+
+        # 🔹 2. Traduz o resto normalmente
         chunks = [text[i:i+4000] for i in range(0, len(text), 4000)]
         translated_chunks = []
-        
+
         for chunk in chunks:
             try:
-                translated = GoogleTranslator(source='auto', target=target_lang).translate(chunk)
+                translated = GoogleTranslator(
+                    source='auto', target=target_lang
+                ).translate(chunk)
                 translated_chunks.append(translated)
-                time.sleep(0.5)  # Rate limiting
+                time.sleep(0.5)
             except Exception as e:
                 logger.warning(f"Erro ao traduzir chunk: {e}")
                 translated_chunks.append(chunk)
-        
+
         return " ".join(translated_chunks)
         
     except Exception as e:
@@ -179,20 +203,7 @@ def analyze_rpg_book_with_gemini(book_text, target_language, campaign_complexity
         **INSTRUÇÕES:**
         1. Analise o livro de RPG acima e ENTENDA seu sistema, cenário, mecânicas e estilo
         2. Crie uma campanha **{campaign_complexity.upper()}** na língua: {target_language}
-        3. Use os seguintes títulos em {target_language} para a estrutura e em hipótese alguma coloque esses títulos em outra lingua que não seja em {target_language}:
-
-        **ESTRUTURA DE TÍTULOS EM {target_language.upper()}:**
-        - VISÃO GERAL (ou equivalente em {target_language})
-        - GANCHO INICIAL
-        - ARQUETIPOS DE PERSONAGENS / ARQUETRAMAS DE PERSONAGENS
-        - SESSÕES DETALHADAS
-        - NPCS IMPORTANTES / PERSONAGENS IMPORTANTES
-        - INIMIGOS E CRIATURAS
-        - RECOMPENSAS E TESOUROS
-        - DESAFIOS E ENIGMAS
-        - FINAIS POSSÍVEIS
-        - MAPAS E LOCALIZAÇÕES
-        4. A campanha deve ser COMPLETA - o mestre deve poder pegar e jogar SEM preparação adicional
+        3. A campanha deve ser COMPLETA - o mestre deve poder pegar e jogar SEM preparação adicional
 
         **FORMATO DA CAMPANHA ({campaign_complexity}):**
         {get_complexity_guidelines(campaign_complexity)}
