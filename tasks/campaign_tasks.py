@@ -163,7 +163,7 @@ def translate_text(text, target_lang):
         return text
 
 def analyze_rpg_book_with_gemini(book_text, target_language, campaign_complexity):
-    """Analisa o livro de RPG e gera campanha usando Gemini"""
+    """Analyzes the RPG book and generates a campaign using Gemini"""
     if not GEMINI_CONFIGURED:
         return generate_fallback_campaign(campaign_complexity, target_language)
     
@@ -171,62 +171,61 @@ def analyze_rpg_book_with_gemini(book_text, target_language, campaign_complexity
         model = genai.GenerativeModel('gemini-2.5-flash-lite')
         
         prompt = f"""
-        VOCÊ É UM MESTRE DE RPG ESPECIALISTA em criar campanhas completas e prontas para jogar.
+        YOU ARE AN RPG GAME MASTER SPECIALIST in creating complete, ready-to-play campaigns.
 
-        **LIVRO DE RPG FORNECIDO:**
-        {book_text[:15000]}... [texto truncado para análise]
+        **RPG BOOK PROVIDED:**
+        {book_text[:15000]}... [text truncated for analysis]
 
-        **INSTRUÇÕES:**
-        1. Analise o livro de RPG acima e ENTENDA seu sistema, cenário, mecânicas e estilo
-        2. Crie uma campanha **{campaign_complexity.upper()}** na língua: {target_language}
-        3. A campanha deve ser COMPLETA - o mestre deve poder pegar e jogar SEM preparação adicional
+        **INSTRUCTIONS:**
+        1. Analyze the RPG book above and UNDERSTAND its system, setting, mechanics, and style
+        2. Create a **{campaign_complexity.upper()}** campaign in the language: {target_language}
+        3. The campaign must be COMPLETE - the GM should be able to pick it up and play WITHOUT additional preparation
 
-        **FORMATO DA CAMPANHA ({campaign_complexity}):**
+        **CAMPAIGN FORMAT ({campaign_complexity}):**
         {get_complexity_guidelines(campaign_complexity)}
 
-        **ESTRUTURA OBRIGATÓRIA NA LÍNGUA: {target_language}:**
+        **MANDATORY STRUCTURE IN {target_language.upper()}:**
         ```yaml
-        Título: [Título criativo da campanha]
-        Complexidade: {campaign_complexity}
-        Sessões: [número baseado na complexidade]
-        Nível dos Personagens: [intervalo recomendado]
-        Sistema: [baseado no livro analisado]
+        Title: [Creative campaign title]
+        Complexity: {campaign_complexity}
+        Sessions: [number based on complexity]
+        Character Level: [recommended range]
+        System: [based on analyzed book]
         ```
 
-        **CONTEÚDO DETALHADO:**
-        - **VISÃO GERAL**: Resumo envolvente da campanha
-        - **GANCHO INICIAL**: Como começar a primeira sessão
-        - **ARQUETRAMAS DE PERSONAGENS**: Sugestões que se encaixam na campanha
-        - **SESSÕES DETALHADAS**: Cada sessão com objetivos, encontros, NPCs, tesouros
-        - **NPCs IMPORTANTES**: Estatísticas completas ou referências
-        - **INIMIGOS E CRIATURAS**: Encontros balanceados
-        - **RECOMPENSAS E TESOUROS**: Itens mágicos, equipamentos, recompensas
-        - **DESAFIOS E ENIGMAS**: Quebra-cabeças e desafios não-combativos
-        - **FINAIS POSSÍVEIS**: Múltiplos desfechos baseados nas escolhas
-        - **MAPAS E LOCALIZAÇÕES**: Descrições detalhadas ou instruções para criar
+        **DETAILED CONTENT:**
+        - **OVERVIEW**: Engaging campaign summary
+        - **STARTING HOOK**: How to begin the first session
+        - **CHARACTER ARCHETYPES**: Suggestions that fit the campaign
+        - **DETAILED SESSIONS**: Each session with objectives, encounters, NPCs, treasures
+        - **IMPORTANT NPCS**: Complete statistics or system references
+        - **ENEMIES AND CREATURES**: Balanced encounters
+        - **REWARDS AND TREASURES**: Magic items, equipment, rewards
+        - **CHALLENGES AND PUZZLES**: Non-combat puzzles and challenges
+        - **POSSIBLE ENDINGS**: Multiple outcomes based on player choices
+        - **MAPS AND LOCATIONS**: Detailed descriptions or creation instructions
 
-        **ESTILO:**
-        - Use markdown para formatação
-        - Seja específico e detalhado
-        - Forneça estatísticas ou referências claras ao sistema
-        - Inclua diálogos de NPCs quando relevante
-        - Balanceie combate, exploração e roleplay
+        **STYLE GUIDELINES:**
+        - Use markdown for formatting
+        - Be specific and detailed
+        - Provide statistics or clear system references
+        - Include NPC dialogues when relevant
+        - Balance combat, exploration, and roleplay
 
-        Gere a campanha completa em {target_language}:
+        Generate the complete campaign in {target_language}:
         """
 
         response = model.generate_content(prompt)
         campaign_content = response.text
         
-        if target_language != 'pt':
+        if target_language != 'en':
             campaign_content = translate_text(campaign_content, target_language)
         
         return format_campaign_output(campaign_content, campaign_complexity, target_language)
         
     except Exception as e:
-        logger.error(f"Erro ao gerar campanha com Gemini: {e}")
+        logger.error(f"Error generating campaign with Gemini: {e}")
         return generate_fallback_campaign(campaign_complexity, target_language)
-
 def generate_fallback_campaign(complexity, language):
     """Gera campanha fallback se o Gemini falhar"""
     base_campaigns = {
@@ -382,35 +381,44 @@ def save_campaign_to_s3(campaign_content, original_filename):
     return upload_content_to_s3(campaign_content, campaign_filename)
 
 def get_complexity_guidelines(complexity):
-    """Retorna diretrizes baseadas na complexidade"""
+    """Returns guidelines based on campaign complexity"""
     guidelines = {
-        'simples': """
-        - 1-2 sessões de 3-4 horas cada
-        - História linear e objetiva
-        - 2-3 encontros principais (combate/roleplay)
-        - 1-2 NPCs importantes
-        - 1 localização principal
-        - Resolução direta
+        'simple': """
+        - 1-2 sessions of 3-4 hours each
+        - Linear and straightforward story
+        - 2-3 main encounters (combat/roleplay)
+        - 1-2 important NPCs
+        - 1 main location
+        - Direct resolution
         """,
-        'mediana': """
-        - 3-4 sessões de 3-4 horas cada  
-        - História com alguns ramos e escolhas
-        - 4-6 encontros diversificados
-        - 3-5 NPCs com personalidades distintas
-        - 2-3 localizações interconectadas
-        - Múltiplas formas de resolver problemas
+        'medium': """
+        - 3-4 sessions of 3-4 hours each  
+        - Story with some branching and choices
+        - 4-6 diverse encounters
+        - 3-5 NPCs with distinct personalities
+        - 2-3 interconnected locations
+        - Multiple ways to solve problems
         """,
-        'complexa': """
-        - 5+ sessões de 3-4 horas cada
-        - História não-linear com múltiplos arcos
-        - 8+ encontros variados (combate, social, exploração)
-        - 6+ NPCs com motivações complexas
-        - 4+ localizações detalhadas
-        - Sistema de consequências por escolhas
-        - Múltiplos finais possíveis
+        'complex': """
+        - 5+ sessions of 3-4 hours each
+        - Non-linear story with multiple story arcs
+        - 8+ varied encounters (combat, social, exploration)
+        - 6+ NPCs with complex motivations
+        - 4+ detailed locations
+        - Consequence system for player choices
+        - Multiple possible endings
         """
     }
-    return guidelines.get(complexity, guidelines['mediana'])
+    
+    # Handle Portuguese input for backward compatibility
+    complexity_map = {
+        'simples': 'simple',
+        'mediana': 'medium',
+        'complexa': 'complex'
+    }
+    
+    english_complexity = complexity_map.get(complexity.lower(), complexity.lower())
+    return guidelines.get(english_complexity, guidelines['medium'])
 
 def process_campaign_generation(job_id, file_url, filename, target_language, campaign_complexity):
     """
