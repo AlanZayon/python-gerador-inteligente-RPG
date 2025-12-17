@@ -143,43 +143,8 @@ def translate_text(text, target_lang):
     try:
         if not text.strip() or len(text.strip()) < 10:
             return text
-        
-        # Primeiro, identificar e traduzir títulos markdown
-        lines = text.split('\n')
-        result_lines = []
-        
-        for line in lines:
-            # Verificar se é um cabeçalho markdown (### TEXTO)
-            if line.strip().startswith('#'):
-                # Separar os hashes do texto
-                parts = line.strip().split(' ', 1)
-                if len(parts) == 2:
-                    hashes, content = parts
-                    # Se o conteúdo está em maiúsculas (como "GANCHO INICIAL")
-                    if content.isupper():
-                        try:
-                            # Traduzir para minúsculas primeiro e depois converter para maiúsculas
-                            translated = GoogleTranslator(source='auto', target=target_lang).translate(content.lower())
-                            result_lines.append(f"{hashes} {translated.upper()}")
-                        except:
-                            result_lines.append(line)
-                    else:
-                        # Para conteúdo normal, traduzir normalmente
-                        try:
-                            translated = GoogleTranslator(source='auto', target=target_lang).translate(content)
-                            result_lines.append(f"{hashes} {translated}")
-                        except:
-                            result_lines.append(line)
-                else:
-                    result_lines.append(line)
-            else:
-                result_lines.append(line)
-        
-        # Juntar as linhas processadas
-        processed_text = "\n".join(result_lines)
-        
-        # Agora traduzir o restante do texto em chunks
-        chunks = [processed_text[i:i+4000] for i in range(0, len(processed_text), 4000)]
+            
+        chunks = [text[i:i+4000] for i in range(0, len(text), 4000)]
         translated_chunks = []
         
         for chunk in chunks:
@@ -191,23 +156,7 @@ def translate_text(text, target_lang):
                 logger.warning(f"Erro ao traduzir chunk: {e}")
                 translated_chunks.append(chunk)
         
-        final_text = " ".join(translated_chunks)
-        
-        # Corrigir possíveis duplicações de títulos (se já foram traduzidos antes)
-        final_lines = final_text.split('\n')
-        cleaned_lines = []
-        
-        for line in final_lines:
-            # Remover duplicação se o título aparecer duas vezes
-            if line.strip().startswith('#') and '#' in line and line.count('#') > 6:
-                # Extrair apenas a parte após os últimos ###
-                last_hash = line.rfind('#')
-                if last_hash > 0:
-                    line = line[last_hash:]
-            
-            cleaned_lines.append(line)
-        
-        return "\n".join(cleaned_lines)
+        return " ".join(translated_chunks)
         
     except Exception as e:
         logger.error(f"Erro na tradução: {e}")
@@ -230,7 +179,20 @@ def analyze_rpg_book_with_gemini(book_text, target_language, campaign_complexity
         **INSTRUÇÕES:**
         1. Analise o livro de RPG acima e ENTENDA seu sistema, cenário, mecânicas e estilo
         2. Crie uma campanha **{campaign_complexity.upper()}** na língua: {target_language}
-        3. A campanha deve ser COMPLETA - o mestre deve poder pegar e jogar SEM preparação adicional
+        3. Use os seguintes títulos em {target_language} para a estrutura:
+
+        **ESTRUTURA DE TÍTULOS EM {target_language.upper()}:**
+        - VISÃO GERAL (ou equivalente em {target_language})
+        - GANCHO INICIAL
+        - ARQUETIPOS DE PERSONAGENS / ARQUETRAMAS DE PERSONAGENS
+        - SESSÕES DETALHADAS
+        - NPCS IMPORTANTES / PERSONAGENS IMPORTANTES
+        - INIMIGOS E CRIATURAS
+        - RECOMPENSAS E TESOUROS
+        - DESAFIOS E ENIGMAS
+        - FINAIS POSSÍVEIS
+        - MAPAS E LOCALIZAÇÕES
+        4. A campanha deve ser COMPLETA - o mestre deve poder pegar e jogar SEM preparação adicional
 
         **FORMATO DA CAMPANHA ({campaign_complexity}):**
         {get_complexity_guidelines(campaign_complexity)}
