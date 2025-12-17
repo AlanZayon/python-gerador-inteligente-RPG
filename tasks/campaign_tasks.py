@@ -179,7 +179,7 @@ def analyze_rpg_book_with_gemini(book_text, target_language, campaign_complexity
         **INSTRUÇÕES:**
         1. Analise o livro de RPG acima e ENTENDA seu sistema, cenário, mecânicas e estilo
         2. Crie uma campanha **{campaign_complexity.upper()}** na língua: {target_language}
-        3. Use os seguintes títulos em {target_language} para a estrutura:
+        3. Use os seguintes títulos em {target_language} para a estrutura e em hipótese alguma coloque esses títulos em outra lingua que não seja em {target_language}:
 
         **ESTRUTURA DE TÍTULOS EM {target_language.upper()}:**
         - VISÃO GERAL (ou equivalente em {target_language})
@@ -343,16 +343,38 @@ Sugestões de arquetipagem: Ranger da floresta, Druida, Clérigo da natureza
     return format_campaign_output(campaign['content'], complexity, language, campaign['title'])
 
 def format_campaign_output(content, complexity, language, title=None):
-    """Formata a saída da campanha de forma padronizada"""
-    session_counts = {'simples': '1-2', 'mediana': '3-4', 'complexa': '5+'}
+    """Formats campaign output in a standardized way"""
+    # Mapear complexidade em português para inglês
+    complexity_map = {
+        'simples': 'simple',
+        'mediana': 'medium',
+        'complexa': 'complex'
+    }
+    
+    # Converter complexidade para inglês
+    english_complexity = complexity_map.get(complexity.lower(), complexity.lower())
+    
+    # Contagem de sessões em inglês
+    session_counts = {
+        'simple': '1-2',
+        'medium': '3-4',
+        'complex': '5+'
+    }
+    
+    # Display amigável da complexidade
+    complexity_display = {
+        'simple': 'Simple',
+        'medium': 'Medium',
+        'complex': 'Complex'
+    }.get(english_complexity, english_complexity.capitalize())
     
     formatted = f"""
-# 🎲 CAMPANHA DE RPG - {complexity.upper()}
+# 🎲 RPG CAMPAIGN - {complexity_display.upper()}
 {'#' if not title else f'# {title}'}
-**Duração**: {session_counts.get(complexity, '3-4')} sessões  
-**Idioma**: {language}  
-**Gerado em**: {datetime.now().strftime('%d/%m/%Y %H:%M')}  
-**Complexidade**: {complexity.capitalize()}
+**Duration**: {session_counts.get(english_complexity, '3-4')} sessions  
+**Language**: {language}  
+**Generated on**: {datetime.now().strftime('%m/%d/%Y %H:%M')}  
+**Complexity**: {complexity_display}
 
 ---
 
@@ -360,8 +382,8 @@ def format_campaign_output(content, complexity, language, title=None):
 
 ---
 
-*Campanha gerada automaticamente a partir de análise de livro de RPG.  
-Balanceamento pode precisar de ajustes para seu grupo específico.*
+*Campaign automatically generated from RPG book analysis.  
+Balance may need adjustments for your specific group.*
 """
     return formatted
 
