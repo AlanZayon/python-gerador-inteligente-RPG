@@ -1,0 +1,120 @@
+"""Campaign generation prompt templates by RPG system."""
+
+SYSTEM_SECTIONS = {
+    "generic": """
+- Use system-agnostic fantasy terminology
+- Reference ability checks and difficulty classes without brand names
+""",
+    "dnd5e": """
+- Use D&D 5e conventions: ability checks, DCs, short/long rests, CR-appropriate encounters
+- Include XP or milestone leveling notes
+- Stat blocks: AC, HP, attack bonus, save DCs
+""",
+    "pf2e": """
+- Use Pathfinder 2e three-action economy and proficiency tiers (+8/+10/+12 etc.)
+- Reference level-based DCs and creature level
+- Include Recall Knowledge and exploration mode where relevant
+""",
+    "coc": """
+- Use Call of Cthulhu: Sanity checks, skill percentiles, investigation focus
+- Clues must be discoverable; avoid combat-only solutions
+- Tone: creeping dread, 1920s–modern era as appropriate
+""",
+}
+
+
+def get_system_instructions(preset_id: str | None) -> str:
+    return SYSTEM_SECTIONS.get(preset_id or "generic", SYSTEM_SECTIONS["generic"])
+
+
+def build_campaign_prompt(
+    *,
+    book_bible: dict,
+    target_language: str,
+    complexity: str,
+    guidelines: str,
+    system_preset: str | None,
+    party_level: str = "",
+    tone: str = "",
+    theme: str = "",
+    pass_type: str = "full",
+    outline: str = "",
+) -> str:
+    system_block = get_system_instructions(system_preset)
+    prefs = ""
+    if party_level:
+        prefs += f"\nParty level: {party_level}"
+    if tone:
+        prefs += f"\nTone: {tone}"
+    if theme:
+        prefs += f"\nOptional theme/hook: {theme}"
+
+    bible_json = str(book_bible)[:12000]
+
+    if pass_type == "outline":
+        return f"""You are an expert RPG campaign designer.
+
+BOOK ANALYSIS (from the user's uploaded rulebook):
+{bible_json}
+
+SYSTEM RULES:
+{system_block}
+{prefs}
+
+Create a detailed campaign OUTLINE for a {complexity.upper()} campaign in {target_language}.
+{guidelines}
+
+Include: title, overview, starting hook, session-by-session bullet outline, key NPCs list, major locations.
+Output in markdown. Language: {target_language}.
+"""
+
+    if pass_type == "expand" and outline:
+        return f"""You are an expert RPG campaign designer.
+
+BOOK ANALYSIS:
+{bible_json}
+
+SYSTEM RULES:
+{system_block}
+{prefs}
+
+Expand this outline into a COMPLETE, play-ready campaign in {target_language}:
+{guidelines}
+
+OUTLINE TO EXPAND:
+{outline}
+
+Mandatory sections: OVERVIEW, STARTING HOOK, CHARACTER ARCHETYPES, DETAILED SESSIONS (each with objectives, encounters, NPCs, treasures), IMPORTANT NPCS, ENEMIES AND CREATURES, REWARDS, CHALLENGES AND PUZZLES, POSSIBLE ENDINGS, MAPS AND LOCATIONS.
+
+Use markdown. Be specific and table-ready. Language: {target_language}.
+"""
+
+    return f"""You are an expert RPG campaign designer.
+
+BOOK ANALYSIS (from the user's uploaded rulebook):
+{bible_json}
+
+SYSTEM RULES:
+{system_block}
+{prefs}
+
+Create a COMPLETE, play-ready {complexity.upper()} campaign in {target_language}.
+{guidelines}
+
+Mandatory sections: OVERVIEW, STARTING HOOK, CHARACTER ARCHETYPES, DETAILED SESSIONS, IMPORTANT NPCS, ENEMIES AND CREATURES, REWARDS, CHALLENGES AND PUZZLES, POSSIBLE ENDINGS, MAPS AND LOCATIONS.
+
+Ground the campaign in the book's setting, terminology, and tone from the analysis above.
+Use markdown. Language: {target_language}.
+"""
+
+
+def build_expand_retry_prompt(content: str, issues: list[str], target_language: str) -> str:
+    issue_list = "\n".join(f"- {i}" for i in issues)
+    return f"""Improve this RPG campaign draft. Fix these quality issues:
+{issue_list}
+
+Expand missing sections. Target language: {target_language}.
+
+DRAFT:
+{content[:25000]}
+"""

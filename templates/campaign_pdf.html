@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="{{ language }}">
+<head>
+  <meta charset="utf-8">
+  <title>{{ title }}</title>
+  <style>
+    @page {
+      size: A4;
+      margin: 2cm 2.2cm 2.5cm;
+      @bottom-center {
+        content: "Arcane Forge — Page " counter(page);
+        font-size: 9px;
+        color: #8a8494;
+      }
+    }
+    body {
+      font-family: Georgia, 'Times New Roman', serif;
+      color: #1a1520;
+      line-height: 1.55;
+      font-size: 11pt;
+    }
+    .cover {
+      text-align: center;
+      padding: 60px 20px 40px;
+      page-break-after: always;
+      border-bottom: 3px double #9a7b1c;
+    }
+    .cover-label {
+      font-size: 10px;
+      letter-spacing: 0.25em;
+      text-transform: uppercase;
+      color: #8a8494;
+      margin-bottom: 16px;
+    }
+    .cover h1 {
+      color: #7a5c10;
+      font-size: 28px;
+      margin: 0 0 12px;
+      line-height: 1.2;
+    }
+    .cover-meta {
+      color: #6b6570;
+      font-size: 13px;
+      margin: 6px 0;
+    }
+    .cover-stats {
+      margin-top: 24px;
+      font-size: 12px;
+      color: #4a4450;
+    }
+    .cover-stats span {
+      margin: 0 10px;
+    }
+    .signals {
+      margin-top: 20px;
+      font-size: 11px;
+      color: #6b6570;
+    }
+    h2.section-heading {
+      color: #9a7b1c;
+      font-size: 18px;
+      border-bottom: 1px solid #e0d8c8;
+      padding-bottom: 4px;
+      margin-top: 28px;
+      page-break-after: avoid;
+    }
+    h2.session-heading {
+      color: #7a5c10;
+      font-size: 16px;
+      border-left: 4px solid #9a7b1c;
+      padding-left: 12px;
+      margin-top: 24px;
+      page-break-after: avoid;
+    }
+    .session-card {
+      margin-bottom: 20px;
+      padding-left: 8px;
+    }
+    .session-tags {
+      font-size: 9px;
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      color: #8a8494;
+      margin-bottom: 8px;
+    }
+    .session-tags span {
+      background: #f5f0e6;
+      padding: 2px 6px;
+      margin-right: 6px;
+      border-radius: 3px;
+    }
+    .objectives {
+      background: #faf7f0;
+      border-left: 3px solid #9a7b1c;
+      padding: 8px 12px;
+      margin: 10px 0;
+      font-size: 10.5pt;
+    }
+    .scene {
+      margin: 8px 0;
+      font-size: 10.5pt;
+    }
+    .scene-label {
+      font-weight: bold;
+      color: #4a4450;
+    }
+    .npc-grid {
+      display: block;
+      margin-top: 10px;
+    }
+    .npc-card {
+      margin-bottom: 12px;
+      padding: 8px 12px;
+      background: #faf7f0;
+      border-radius: 4px;
+    }
+    .npc-name {
+      font-weight: bold;
+      color: #7a5c10;
+    }
+    p { margin: 0 0 8px; }
+    ul, ol { margin: 0 0 10px; padding-left: 20px; }
+    li { margin-bottom: 4px; }
+    blockquote {
+      border-left: 3px solid #9a7b1c;
+      padding-left: 12px;
+      color: #4a4450;
+      font-style: italic;
+    }
+    .generic-body { margin-top: 8px; }
+    .footer-note {
+      margin-top: 40px;
+      font-size: 9px;
+      color: #8a8494;
+      text-align: center;
+      page-break-before: avoid;
+    }
+  </style>
+</head>
+<body>
+  <div class="cover">
+    <div class="cover-label">Campaign Manuscript</div>
+    <h1>{{ title }}</h1>
+    <p class="cover-meta">Arcane Forge · {{ language | upper }} · {{ complexity | capitalize }}</p>
+    {% if session_count %}
+    <div class="cover-stats">
+      <span>{{ session_count }} session{{ 's' if session_count != 1 else '' }}</span>
+      <span>{{ word_count }} words</span>
+      {% if quality_score %}<span>Quality {{ quality_score }}/100</span>{% endif %}
+    </div>
+    {% endif %}
+    {% if book_signals %}
+    <div class="signals">Inspired by: {{ book_signals | join(', ') }}</div>
+    {% endif %}
+  </div>
+
+  {% for section in sections %}
+    {% if section.type == 'session' %}
+    <div class="session-card">
+      <h2 class="session-heading">Session {{ section.number }}: {{ section.heading | replace('Session ' ~ section.number ~ ':', '') | replace('Sessão ' ~ section.number ~ ':', '') | trim }}</h2>
+      {% if section.tags %}
+      <div class="session-tags">
+        {% for tag in section.tags %}<span>{{ tag }}</span>{% endfor %}
+      </div>
+      {% endif %}
+      {% if section.objectives %}
+      <div class="objectives"><strong>Objectives:</strong> {{ section.objectives }}</div>
+      {% endif %}
+      {% for scene in section.scenes %}
+      <div class="scene">
+        {% if scene.label %}<span class="scene-label">Scene {{ scene.label }}:</span> {% endif %}
+        {{ scene.text }}
+      </div>
+      {% endfor %}
+      {% if section.combat %}<p><strong>Combat:</strong> {{ section.combat }}</p>{% endif %}
+      {% if section.puzzle %}<p><strong>Puzzle:</strong> {{ section.puzzle }}</p>{% endif %}
+      {% if not section.objectives and not section.scenes and section.content_html %}
+      <div class="generic-body">{{ section.content_html | safe }}</div>
+      {% elif not section.objectives and not section.scenes and section.content %}
+      <div class="generic-body"><p>{{ section.content | replace('\n', '<br>') | safe }}</p></div>
+      {% endif %}
+    </div>
+    {% elif section.type == 'npcs' %}
+    <h2 class="section-heading">{{ section.heading }}</h2>
+    <div class="npc-grid">
+      {% for npc in section.npcs %}
+      <div class="npc-card">
+        <div class="npc-name">{{ npc.name }}</div>
+        <div>{{ npc.description }}</div>
+      </div>
+      {% endfor %}
+      {% if not section.npcs and section.content_html %}
+      <div class="generic-body">{{ section.content_html | safe }}</div>
+      {% endif %}
+    </div>
+    {% elif section.type not in ('inspired',) %}
+    <h2 class="section-heading">{{ section.heading }}</h2>
+    <div class="generic-body">
+      {% if section.content_html %}
+      {{ section.content_html | safe }}
+      {% else %}
+      <p>{{ section.content | replace('\n', '<br>') | safe }}</p>
+      {% endif %}
+    </div>
+    {% endif %}
+  {% endfor %}
+
+  <p class="footer-note">Generated with Arcane Forge — for personal tabletop use. Review balance for your table.</p>
+</body>
+</html>

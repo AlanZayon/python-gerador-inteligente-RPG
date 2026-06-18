@@ -1,10 +1,25 @@
-name: Test Actions
+name: Backend CI
 
 on:
-  workflow_dispatch:
+  push:
+    branches: [main, master]
+  pull_request:
 
 jobs:
   test:
     runs-on: ubuntu-latest
     steps:
-      - run: echo "GitHub Actions funcionando"
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Lint
+        run: ruff check app.py worker.py services tasks tests
+
+      - name: Run tests
+        run: pytest -q

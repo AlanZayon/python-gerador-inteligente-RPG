@@ -1,70 +1,119 @@
-from flask import Flask, request, jsonify, send_from_directory
+from flask import Flask, request, jsonify, g
 from flask_cors import CORS
 from werkzeug.utils import secure_filename
 from dotenv import load_dotenv
 import requests
 import os
 import logging
-import time
-from functools import wraps
 import uuid
 import redis
-from rq import Queue
-import json
 from datetime import datetime
 
-# IMPORTE A FUNÇÃO DO MÓDULO DE TAREFAS
-from tasks.campaign_tasks import process_campaign_generation
-from services.s3_storage import upload_pdf_to_s3
-
+from database import check_database_connection, init_db
+from tasks.campaign_tasks import is_gemini_configured
+from examples.campaign_samples import get_sample_campaign
+from services.s3_storage import upload_pdf_to_s3, generate_presigned_url, fetch_s3_text, s3_configured
+from services.redis_client import (
+    PENDING_JOBS_QUEUE,
+    PRIORITY_JOBS_QUEUE,
+    create_redis_client,
+    get_redis_url,
+)
+from services.job_status import build_api_response, get_status, save_status
+from services.auth import require_user, optional_user, resolve_auth_context, validate_production_auth_config
+from services.rate_limit import redis_rate_limit
+from services.validation import (
+    is_valid_job_id,
+    validate_complexity,
+    validate_language,
+    validate_pdf_magic_bytes,
+)
+from services.quota import QuotaError, check_and_deduct, quota_error_response
+from services.jobs_db import create_job_record, get_job_for_user, get_job_by_share_slug
+from services.legal_content import CONTENT_LICENSE
+from services.system_presets import SYSTEM_PRESETS
+from services.sentry_init import init_sentry
+from routes.billing import billing_bp
+from routes.dashboard import dashboard_bp
 
 load_dotenv()
+validate_production_auth_config()
+init_sentry()
 
-# Configuração de logging
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
 
-# AWS S3 Configuration
+IS_PRODUCTION = os.getenv("FLASK_ENV", "").lower() == "production"
+USE_GHA_WORKER = os.getenv("USE_GHA_WORKER", "false").lower() == "true"
+GHA_DISPATCH_COOLDOWN = int(os.getenv("GHA_DISPATCH_COOLDOWN", "300"))
+FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:5173")
+
 S3_BUCKET_NAME = os.getenv('S3_BUCKET_NAME')
 AWS_REGION = os.getenv('AWS_REGION', 'us-east-1')
-GEMINI_CONFIGURED = os.getenv('GEMINI_API_KEY') is not None
+GEMINI_CONFIGURED = is_gemini_configured()
+
+CORS_ORIGINS = os.getenv(
+    "CORS_ORIGINS",
+    "http://localhost:5173,https://pdf-translate-vue.vercel.app",
+).split(",")
 
 app = Flask(__name__)
-CORS(app, origins=["http://localhost:5173", "https://pdf-translate-vue.vercel.app"])
+CORS(app, origins=[o.strip() for o in CORS_ORIGINS if o.strip()])
+app.register_blueprint(billing_bp)
+app.register_blueprint(dashboard_bp)
 
 UPLOAD_FOLDER = 'uploads/'
 CAMPAIGN_FOLDER = 'campaigns/'
-JOB_STATUS_FOLDER = 'job_status/'
 ALLOWED_EXTENSIONS = {'pdf'}
-MAX_FILE_SIZE = 50 * 1024 * 1024  # 50MB
+MAX_FILE_SIZE = 50 * 1024 * 1024
 
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 app.config['CAMPAIGN_FOLDER'] = CAMPAIGN_FOLDER
-app.config['JOB_STATUS_FOLDER'] = JOB_STATUS_FOLDER
 app.config['MAX_CONTENT_LENGTH'] = MAX_FILE_SIZE
 
-# Configurar Redis e RQ
-REDIS_URL = os.getenv('REDIS_URL', 'redis://localhost:6379/0')
 redis_conn = None
-task_queue = None
 
 try:
-    redis_conn = redis.from_url(REDIS_URL, socket_connect_timeout=5)
-    redis_conn.ping()
-    logger.info(f"✅ Redis conectado: {REDIS_URL}")
-    task_queue = Queue('campaign_generation', connection=redis_conn, default_timeout=3600)
-except redis.ConnectionError as e:
-    logger.warning(f"❌ Redis não disponível: {e}")
-    logger.warning("Usando modo de desenvolvimento sem Redis (jobs serão processados sincronamente)")
-    task_queue = None
+    init_db()
+    logger.info("Database initialized")
 except Exception as e:
-    logger.warning(f"❌ Erro ao conectar ao Redis: {e}")
-    task_queue = None
+    logger.warning("Database init failed: %s", e)
 
-def trigger_worker():
+try:
+    redis_conn = create_redis_client(decode_responses=False)
+    redis_conn.ping()
+    logger.info("Redis conectado: %s", get_redis_url())
+except redis.ConnectionError as e:
+    logger.warning("Redis não disponível: %s", e)
+except Exception as e:
+    logger.warning("Erro ao conectar ao Redis: %s", e)
+
+for folder in [UPLOAD_FOLDER, CAMPAIGN_FOLDER]:
+    os.makedirs(folder, exist_ok=True)
+
+
+def _error_message(exc: Exception) -> str:
+    if IS_PRODUCTION:
+        return "Internal server error"
+    return str(exc)
+
+
+def allowed_file(filename: str) -> bool:
+    return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
+
+
+def _queue_for_plan(plan: str) -> str:
+    return PRIORITY_JOBS_QUEUE if plan in ("pro", "studio") else PENDING_JOBS_QUEUE
+
+
+def trigger_worker() -> None:
+    if not USE_GHA_WORKER:
+        logger.info("GHA worker desabilitado (USE_GHA_WORKER=false). Use worker persistente.")
+        return
+
     owner = os.getenv("GITHUB_REPO_OWNER")
     repo = os.getenv("GITHUB_REPO_NAME")
     workflow = os.getenv("GITHUB_WORKFLOW_FILE", "campaign_worker.yml")
@@ -72,411 +121,410 @@ def trigger_worker():
     token = os.getenv("GITHUB_TOKEN")
 
     if not all([owner, repo, workflow, token]):
-        logger.warning("⚠️ Variáveis de ambiente do GitHub não configuradas")
+        logger.warning("Variáveis de ambiente do GitHub não configuradas")
         return
+
+    if redis_conn is not None:
+        try:
+            last_dispatch = redis_conn.get("rpg:gha_last_dispatch")
+            if last_dispatch:
+                elapsed = datetime.utcnow().timestamp() - float(last_dispatch)
+                if elapsed < GHA_DISPATCH_COOLDOWN:
+                    logger.info("GHA dispatch throttled (%.0fs restantes)", GHA_DISPATCH_COOLDOWN - elapsed)
+                    return
+        except Exception as exc:
+            logger.warning("Erro ao verificar throttle GHA: %s", exc)
 
     url = (
         f"https://api.github.com/repos/"
         f"{owner}/{repo}/"
         f"actions/workflows/{workflow}/dispatches"
     )
-
     headers = {
         "Authorization": f"Bearer {token}",
-        "Accept": "application/vnd.github+json"
+        "Accept": "application/vnd.github+json",
     }
-
-    payload = {"ref": branch}
-
-    response = requests.post(url, headers=headers, json=payload)
+    response = requests.post(url, headers=headers, json={"ref": branch}, timeout=30)
 
     if response.status_code not in (200, 204):
-        logger.error(
-            f"❌ Falha ao disparar worker: "
-            f"{response.status_code} - {response.text}"
-        )
+        logger.error("Falha ao disparar worker: %s - %s", response.status_code, response.text)
         response.raise_for_status()
 
-    logger.info("🚀 Worker do GitHub Actions disparado com sucesso")
+    if redis_conn is not None:
+        try:
+            redis_conn.set("rpg:gha_last_dispatch", str(datetime.utcnow().timestamp()))
+            redis_conn.expire("rpg:gha_last_dispatch", GHA_DISPATCH_COOLDOWN)
+        except Exception:
+            pass
 
-# Criar diretórios se não existirem
-for folder in [UPLOAD_FOLDER, CAMPAIGN_FOLDER, JOB_STATUS_FOLDER]:
-    os.makedirs(folder, exist_ok=True)
+    logger.info("Worker do GitHub Actions disparado com sucesso")
 
-# FUNÇÕES DE APOIO (mantenha apenas essas)
-def allowed_file(filename):
-    return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
-def rate_limit(max_calls=10, window=60):
-    """Decorator para limitar taxa de requisições"""
-    calls = []
-    
-    def decorator(func):
-        @wraps(func)
-        def wrapper(*args, **kwargs):
-            now = time.time()
-            calls[:] = [call_time for call_time in calls if now - call_time < window]
-            
-            if len(calls) >= max_calls:
-                return jsonify({'error': 'Muitas requisições. Tente novamente em alguns segundos.'}), 429
-            
-            calls.append(now)
-            return func(*args, **kwargs)
-        return wrapper
-    return decorator
+def _verify_job_access(job_id: str) -> tuple[dict | None, tuple | None]:
+    """Return (status_data, error_response) — error_response is (json, code)."""
+    status_data = get_status(job_id)
+    if not status_data:
+        db_job = get_job_for_user(job_id, g.user.id if g.user else None)
+        if not db_job:
+            return None, (jsonify({'error': 'Job not found'}), 404)
+        status_data = {"status": db_job.status}
 
-def get_job_status(job_id):
-    job_key = f"rpg:job:{job_id}"
-    try:
-        raw_data = redis_conn.hgetall(job_key)
-        logger.debug(f"Consultando Redis key={job_key}: {raw_data}")
+    if g.user:
+        db_job = get_job_for_user(job_id, g.user.id)
+        if not db_job:
+            return None, (jsonify({'error': 'Access denied'}), 403)
+    elif IS_PRODUCTION:
+        return None, (jsonify({'error': 'Authentication required'}), 401)
 
-        if not raw_data:
-            logger.error(f"Job {job_id} não encontrado no Redis.")
-            return None
+    return status_data, None
 
-        # Converter bytes para string
-        status_data = {k.decode() if isinstance(k, bytes) else k:
-                       v.decode() if isinstance(v, bytes) else v
-                       for k, v in raw_data.items()}
 
-        if 'status' not in status_data:
-            logger.error(
-                f"Status missing for job {job_id}. Chaves retornadas: {list(status_data.keys())}, valores: {status_data}"
-            )
-            return None
-
-        # Se houver resultado salvo em hash separado
-        result_raw = redis_conn.hgetall(f"{job_key}:result")
-        if result_raw:
-            result_data = {k.decode() if isinstance(k, bytes) else k:
-                           v.decode() if isinstance(v, bytes) else v
-                           for k, v in result_raw.items()}
-            status_data['data'] = result_data
-
-        return status_data
-
-    except Exception as e:
-        logger.exception(f"Erro ao buscar status do job {job_id}: {e}")
-        return None
-
-def cleanup_old_files():
-    """Remove arquivos antigos (mais de 24 horas)"""
-    try:
-        now = time.time()
-        for folder in [UPLOAD_FOLDER, CAMPAIGN_FOLDER, JOB_STATUS_FOLDER]:
-            if os.path.exists(folder):
-                for filename in os.listdir(folder):
-                    file_path = os.path.join(folder, filename)
-                    if os.path.isfile(file_path):
-                        if now - os.path.getmtime(file_path) > 86400:  # 24 horas
-                            os.remove(file_path)
-                            logger.info(f"Arquivo antigo removido: {file_path}")
-    except Exception as e:
-        logger.warning(f"Erro na limpeza: {e}")
-
-# ROTAS (mantenha todas as rotas, exceto a função generate_campaign que vamos atualizar)
 @app.route('/generate-campaign', methods=['POST'])
-@rate_limit(max_calls=5, window=60)
+@require_user
+@redis_rate_limit(max_calls=10, window=3600, prefix="rl:upload")
 def generate_campaign():
-    """Endpoint para iniciar geração de campanha (assíncrono via Redis + S3)"""
-    logger.info("🎲 Recebendo requisição de geração de campanha...")
-
+    logger.info("Recebendo requisição de geração de campanha...")
     input_pdf = None
 
     try:
-        # =========================
-        # Validações do arquivo
-        # =========================
         if 'file' not in request.files:
-            return jsonify({'error': 'Nenhum arquivo enviado'}), 400
+            return jsonify({'error': 'No file uploaded'}), 400
 
         file = request.files['file']
-
         if file.filename == '':
-            return jsonify({'error': 'Nenhum arquivo selecionado'}), 400
-
+            return jsonify({'error': 'No file selected'}), 400
         if not allowed_file(file.filename):
-            return jsonify({'error': 'Tipo de arquivo não suportado. Use apenas PDF.'}), 400
+            return jsonify({'error': 'Unsupported file type. PDF only.'}), 400
 
-        # =========================
-        # Parâmetros da campanha
-        # =========================
-        target_language = request.form.get('target_language', 'pt')
+        target_language = request.form.get('target_language', 'en')
         campaign_complexity = request.form.get('complexity', 'mediana')
+        system_preset = request.form.get('system_preset', 'generic')
+        party_level = request.form.get('party_level', '')
+        tone = request.form.get('tone', '')
+        theme = request.form.get('theme', '')
+        idempotency_key = request.headers.get('Idempotency-Key')
 
-        if campaign_complexity not in ['simples', 'mediana', 'complexa']:
-            return jsonify({
-                'error': 'Complexidade deve ser: simples, mediana ou complexa'
-            }), 400
+        if idempotency_key:
+            from services.jobs_db import find_idempotent_job
+            existing = find_idempotent_job(g.user.id, idempotency_key)
+            if existing:
+                return jsonify({
+                    'success': True,
+                    'job_id': existing.id,
+                    'status': existing.status,
+                    'message': 'Existing job returned (idempotent)',
+                }), 200
 
-        # =========================
-        # Criar Job
-        # =========================
+        if not validate_language(target_language):
+            return jsonify({'error': 'Unsupported language'}), 400
+        if not validate_complexity(campaign_complexity):
+            return jsonify({'error': 'Complexity must be: simples, mediana or complexa'}), 400
+        if system_preset not in SYSTEM_PRESETS:
+            system_preset = 'generic'
+
         job_id = str(uuid.uuid4())
-        logger.info(
-            f"Novo job criado: {job_id} | Idioma={target_language} | Complexidade={campaign_complexity}"
-        )
-
-        # =========================
-        # Salvar arquivo TEMPORÁRIO
-        # =========================
         filename = secure_filename(file.filename)
-        input_pdf = os.path.join(
-            app.config['UPLOAD_FOLDER'],
-            f"{job_id}_{filename}"
-        )
+        input_pdf = os.path.join(app.config['UPLOAD_FOLDER'], f"{job_id}_{filename}")
         file.save(input_pdf)
 
-        # =========================
-        # Upload para S3
-        # =========================
-        upload_result = upload_pdf_to_s3(input_pdf, filename)
+        if not validate_pdf_magic_bytes(input_pdf):
+            os.remove(input_pdf)
+            return jsonify({'error': 'File is not a valid PDF'}), 400
 
-        # Remove o arquivo local após upload
+        try:
+            credits_charged = check_and_deduct(g.user, campaign_complexity, job_id)
+        except QuotaError as exc:
+            os.remove(input_pdf)
+            return quota_error_response(exc)
+
+        existing = create_job_record(
+            job_id=job_id,
+            user_id=g.user.id,
+            complexity=campaign_complexity,
+            language=target_language,
+            filename=filename,
+            credits_charged=credits_charged,
+            idempotency_key=idempotency_key,
+            system_preset=system_preset,
+        )
+        if existing.id != job_id:
+            if input_pdf and os.path.exists(input_pdf):
+                os.remove(input_pdf)
+            return jsonify({
+                'success': True,
+                'job_id': existing.id,
+                'status': existing.status,
+                'message': 'Existing job returned (idempotent)',
+            }), 200
+
+        upload_result = upload_pdf_to_s3(input_pdf, filename)
         os.remove(input_pdf)
         input_pdf = None
 
-        # =========================
-        # Fallback síncrono (sem Redis)
-        # =========================
-        # if redis_conn is None:
-        #     logger.warning("⚠️ Redis indisponível — executando processamento síncrono")
+        if redis_conn is None:
+            return jsonify({'error': 'Redis unavailable. Check REDIS_URL and restart the API.'}), 503
 
-        #     file_url = upload_result["file_url"]
-
-
-        #     result = process_campaign_generation(
-        #         job_id=job_id,
-        #         file_url=file_url,
-        #         filename=filename,
-        #         target_language=target_language,
-        #         campaign_complexity=campaign_complexity
-        #     )
-
-        #     if not result:
-        #         return jsonify({'error': 'Falha ao processar campanha'}), 500
-
-        #     return jsonify({
-        #         'success': True,
-        #         'job_id': job_id,
-        #         'status': 'completed',
-        #         'result': result
-        #     }), 200
-
-        # =========================
-        # Modo assíncrono (Redis)
-        # =========================
         job_key = f"rpg:job:{job_id}"
-
         redis_conn.hset(job_key, mapping={
             "job_id": job_id,
+            "user_id": g.user.id,
             "file_url": upload_result["file_url"],
             "s3_key": upload_result["s3_key"],
             "filename": filename,
             "language": target_language,
             "complexity": campaign_complexity,
+            "system_preset": system_preset,
+            "party_level": party_level,
+            "tone": tone,
+            "theme": theme,
+            "credits_charged": str(credits_charged),
             "status": "queued",
-            "created_at": datetime.utcnow().isoformat()
+            "created_at": datetime.utcnow().isoformat(),
         })
 
-        # Enfileirar job
-        redis_conn.rpush('rpg:pending_jobs', job_id)
+        queue_name = _queue_for_plan(g.user.plan)
+        redis_conn.rpush(queue_name, job_id)
+        save_status(job_id, "queued", {"progress": "Waiting for processing...", "progress_percent": 3}, conn=create_redis_client())
 
-        logger.info(f"📥 Job {job_id} adicionado à fila Redis")
-
-        # =========================
-        # Disparar worker (GitHub Actions)
-        # =========================
         try:
             trigger_worker()
-            logger.info("🚀 Workflow do worker disparado")
         except Exception as e:
-            logger.error(f"⚠️ Falha ao disparar worker: {e}")
+            logger.error("Falha ao disparar worker: %s", e)
 
+        from services.users import get_user_by_id
+        fresh_user = get_user_by_id(g.user.id)
         return jsonify({
             'success': True,
             'job_id': job_id,
             'status': 'queued',
-            'message': 'Job adicionado à fila de processamento'
+            'credits_charged': credits_charged,
+            'credits_remaining': fresh_user.credits_balance if fresh_user else 0,
+            'message': 'Job queued for processing',
         }), 202
 
     except Exception as e:
-        logger.error(f"🚨 Erro ao iniciar geração de campanha: {e}")
-
+        logger.error("Erro ao iniciar geração de campanha: %s", e)
         if input_pdf and os.path.exists(input_pdf):
             try:
                 os.remove(input_pdf)
             except Exception:
                 pass
-
-        return jsonify({
-            'error': f'Erro ao processar requisição: {str(e)}'
-        }), 500
+        return jsonify({'error': _error_message(e)}), 500
 
 
 @app.route('/job-status/<job_id>', methods=['GET'])
+@optional_user
+@redis_rate_limit(max_calls=60, window=60, prefix="rl:poll")
 def get_job_status_endpoint(job_id):
-    status_data = get_job_status(job_id)
+    if not is_valid_job_id(job_id):
+        return jsonify({'error': 'Invalid job ID'}), 400
 
-    if not status_data:
-        return jsonify({'error': 'Job não encontrado'}), 404
+    status_data, err = _verify_job_access(job_id)
+    if err:
+        return err
 
-    job_status = status_data.get('status', 'unknown')
-    last_updated = (
-        status_data.get('last_updated')
-        or status_data.get('processed_at')
-        or status_data.get('created_at')
-    )
+    return jsonify(build_api_response(job_id, status_data))
 
-    response = {
+
+@app.route('/job-status/<job_id>/refresh-url', methods=['POST'])
+@require_user
+def refresh_campaign_url(job_id):
+    if not is_valid_job_id(job_id):
+        return jsonify({'error': 'Invalid job ID'}), 400
+
+    db_job = get_job_for_user(job_id, g.user.id)
+    if not db_job:
+        return jsonify({'error': 'Access denied'}), 403
+
+    status_data = get_status(job_id)
+    if not status_data or status_data.get("status") != "completed":
+        return jsonify({'error': 'Campaign not completed or job not found'}), 404
+
+    result = status_data.get("data") or {}
+    s3_key = result.get("s3_key") or db_job.campaign_s3_key
+    if not s3_key:
+        return jsonify({'error': 'S3 key not found for this job'}), 404
+
+    new_url = generate_presigned_url(s3_key)
+    updated = {**result, "campaign_url": new_url}
+    save_status(job_id, "completed", updated, conn=create_redis_client())
+
+    return jsonify({
         'job_id': job_id,
-        'status': job_status,
-        'last_updated': last_updated,
-        'result': status_data.get('data') 
+        'campaign_url': new_url,
+    })
+
+
+@app.route('/c/<slug>', methods=['GET'])
+@redis_rate_limit(max_calls=30, window=60, prefix="rl:share")
+def get_shared_campaign(slug):
+    job = get_job_by_share_slug(slug)
+    if not job or not job.campaign_s3_key:
+        return jsonify({'error': 'Shared campaign not found'}), 404
+    content = fetch_s3_text(job.campaign_s3_key)
+    if not content:
+        return jsonify({'error': 'Campaign content unavailable'}), 404
+    return jsonify({
+        'slug': slug,
+        'complexity': job.complexity,
+        'language': job.language,
+        'content': content,
+        'created_at': job.completed_at.isoformat() if job.completed_at else None,
+    })
+
+
+@app.route('/legal/content-license', methods=['GET'])
+def get_content_license():
+    return jsonify({'license': CONTENT_LICENSE})
+
+
+@app.route('/system-presets', methods=['GET'])
+def get_system_presets():
+    return jsonify({
+        k: {"id": v["id"], "name": v["name"], "description": v["description"]}
+        for k, v in SYSTEM_PRESETS.items()
+    })
+
+
+@app.route('/health/ready', methods=['GET'])
+def health_ready():
+    checks = {
+        "database": check_database_connection(),
+        "redis": False,
+        "s3": s3_configured(),
     }
+    if redis_conn is not None:
+        try:
+            redis_conn.ping()
+            checks["redis"] = True
+        except Exception:
+            checks["redis"] = False
+    ready = checks["database"] and checks["redis"]
+    return jsonify({"ready": ready, "checks": checks}), 200 if ready else 503
 
-    return jsonify(response)
-
-
-# @app.route('/download-campaign/<filename>')
-# def download_campaign(filename):
-#     """Download da campanha gerada"""
-#     try:
-#         # A URL pré-assinada para o arquivo do S3
-#         presigned_url = f"https://{S3_BUCKET_NAME}.s3.{AWS_REGION}.amazonaws.com/{filename}"
-#         return jsonify({'download_url': presigned_url}), 200
-#     except Exception as e:
-#         logger.error(f"Erro no download da campanha: {e}")
-#         return jsonify({'error': 'Campanha não encontrada'}), 404
 
 @app.route('/campaign-complexities', methods=['GET'])
 def get_campaign_complexities():
-    """Retorna complexidades de campanha disponíveis"""
     complexities = {
         'simples': {
-            'name': 'Campanha Simples',
-            'sessions': '1-2 sessões',
-            'description': 'História direta e objetiva, perfeita para oneshots ou introduções',
-            'duration': '3-8 horas totais',
-            'focus': 'Combate e objetivos claros'
+            'name': 'Simple Campaign',
+            'sessions': '1-2 sessions',
+            'description': 'Direct story, perfect for one-shots or introductions',
+            'duration': '3-8 hours total',
+            'focus': 'Combat and clear objectives',
+            'credits': 1,
         },
         'mediana': {
-            'name': 'Campanha Mediana', 
-            'sessions': '3-4 sessões',
-            'description': 'Equilíbrio entre combate, exploração e desenvolvimento',
-            'duration': '9-16 horas totais',
-            'focus': 'História com ramificações e escolhas'
+            'name': 'Medium Campaign',
+            'sessions': '3-4 sessions',
+            'description': 'Balance of combat, exploration, and character development',
+            'duration': '9-16 hours total',
+            'focus': 'Branching story and meaningful choices',
+            'credits': 2,
         },
         'complexa': {
-            'name': 'Campanha Complexa',
-            'sessions': '5+ sessões',
-            'description': 'Arco épico com múltiplos caminhos e consequências',
-            'duration': '17+ horas totais', 
-            'focus': 'Narrativa profunda e desenvolvimento de personagem'
-        }
+            'name': 'Complex Campaign',
+            'sessions': '5+ sessions',
+            'description': 'Epic arc with multiple paths and consequences',
+            'duration': '17+ hours total',
+            'focus': 'Deep narrative and character arcs',
+            'credits': 4,
+        },
     }
     return jsonify(complexities)
 
+
 @app.route('/supported-languages', methods=['GET'])
 def get_supported_languages():
-    """Retorna idiomas suportados para campanhas"""
     languages = {
-        'pt': 'Português',
-        'en': 'English', 
-        'es': 'Español',
-        'fr': 'Français',
-        'de': 'Deutsch',
-        'it': 'Italiano',
-        'ja': '日本語',
-        'ko': '한국어',
-        'zh': '中文',
-        'ru': 'Русский'
+        'pt': 'Português', 'en': 'English', 'es': 'Español', 'fr': 'Français',
+        'de': 'Deutsch', 'it': 'Italiano', 'ja': '日本語', 'ko': '한국어',
+        'zh': '中文', 'ru': 'Русский',
     }
     return jsonify(languages)
 
+
 @app.route('/status', methods=['GET'])
-def get_status():
-    """Status da API"""
+def get_status_endpoint():
+    pending_jobs = 0
+    priority_jobs = 0
+    if redis_conn is not None:
+        try:
+            pending_jobs = redis_conn.llen(PENDING_JOBS_QUEUE)
+            priority_jobs = redis_conn.llen(PRIORITY_JOBS_QUEUE)
+        except Exception as e:
+            logger.warning("Erro ao consultar fila Redis: %s", e)
+
     return jsonify({
         'status': 'online',
-        'service': 'RPG Campaign Generator',
+        'service': 'Arcane Forge',
         'supported_formats': list(ALLOWED_EXTENSIONS),
         'max_file_size_mb': MAX_FILE_SIZE // (1024 * 1024),
         'gemini_configured': GEMINI_CONFIGURED,
+        'redis_connected': redis_conn is not None,
         'queue_status': {
-            'queued': len(task_queue.jobs),
-            'workers': len(task_queue.get_workers())
-        }
+            'pending_jobs': pending_jobs,
+            'priority_jobs': priority_jobs,
+        },
     })
+
 
 @app.route('/example-campaign', methods=['GET'])
 def get_example_campaign():
-    """Retorna um exemplo de campanha sem precisar de upload"""
     try:
         complexity = request.args.get('complexity', 'mediana')
-        language = request.args.get('language', 'pt')
-        
-        example = generate_fallback_campaign(complexity, language)
-        
+        language = request.args.get('language', 'en')
+        if not validate_complexity(complexity):
+            return jsonify({'error': 'Invalid complexity'}), 400
+        if not validate_language(language):
+            return jsonify({'error': 'Invalid language'}), 400
+
+        example = get_sample_campaign(complexity, language)
+        if not example:
+            return jsonify({'error': 'No sample available'}), 404
         return jsonify({
             'success': True,
             'complexity': complexity,
             'language': language,
             'content': example,
-            'message': 'Exemplo de campanha gerado'
+            'message': 'Demo sample campaign',
+            'is_demo': True,
         })
-        
     except Exception as e:
-        logger.error(f"Erro ao gerar exemplo: {e}")
-        return jsonify({'error': 'Erro ao gerar exemplo'}), 500
+        logger.error("Erro ao gerar exemplo: %s", e)
+        return jsonify({'error': 'Error generating example'}), 500
 
-def get_complexity_guidelines(complexity):
-    """Retorna diretrizes baseadas na complexidade"""
-    guidelines = {
-        'simples': """
-        - 1-2 sessões de 3-4 horas cada
-        - História linear e objetiva
-        - 2-3 encontros principais (combate/roleplay)
-        - 1-2 NPCs importantes
-        - 1 localização principal
-        - Resolução direta
-        """,
-        'mediana': """
-        - 3-4 sessões de 3-4 horas cada  
-        - História com alguns ramos e escolhas
-        - 4-6 encontros diversificados
-        - 3-5 NPCs com personalidades distintas
-        - 2-3 localizações interconectadas
-        - Múltiplas formas de resolver problemas
-        """,
-        'complexa': """
-        - 5+ sessões de 3-4 horas cada
-        - História não-linear com múltiplos arcos
-        - 8+ encontros variados (combate, social, exploração)
-        - 6+ NPCs com motivações complexas
-        - 4+ localizações detalhadas
-        - Sistema de consequências por escolhas
-        - Múltiplos finais possíveis
-        """
-    }
-    return guidelines.get(complexity, guidelines['mediana'])
+
+@app.route('/detect-system', methods=['POST'])
+@require_user
+@redis_rate_limit(max_calls=20, window=3600, prefix="rl:detect")
+def detect_system():
+    """Suggest system preset from uploaded PDF excerpt."""
+    from services.system_detect import detect_system_preset
+    from tasks.campaign_tasks import extract_text_from_pdf, validate_pdf
+
+    if 'file' not in request.files:
+        return jsonify({'error': 'No file uploaded'}), 400
+    file = request.files['file']
+    if not file.filename:
+        return jsonify({'error': 'No file selected'}), 400
+
+    temp_path = os.path.join(app.config['UPLOAD_FOLDER'], f"detect_{uuid.uuid4()}.pdf")
+    try:
+        file.save(temp_path)
+        if not validate_pdf_magic_bytes(temp_path):
+            return jsonify({'error': 'Invalid PDF'}), 400
+        is_valid, msg = validate_pdf(temp_path)
+        if not is_valid:
+            return jsonify({'error': msg}), 400
+        text = extract_text_from_pdf(temp_path)
+        preset = detect_system_preset(text)
+        return jsonify({'preset': preset, 'detected': preset is not None})
+    finally:
+        if os.path.exists(temp_path):
+            os.remove(temp_path)
+
 
 if __name__ == '__main__':
-    cleanup_old_files()
-    logger.info("🚀 Servidor iniciado - Gerador de Campanhas de RPG")
-    print("""
-    🎲 RPG CAMPAIGN GENERATOR 🎲
-    ===========================
-    Serviço: Transformação de livros de RPG em campanhas prontas
-    Endpoints:
-    - POST /generate-campaign   → Inicia geração assíncrona (retorna job_id)
-    - GET  /job-status/:job_id  → Verifica status do processamento
-    - GET  /example-campaign    → Exemplo sem upload
-    - GET  /campaign-complexities → Tipos de campanha
-    - GET  /supported-languages → Idiomas disponíveis
-    
-    ⚠️  Configure Redis em um worker separado:
-    $ rq worker campaign_generation --url redis://localhost:6379/0
-    """)
-    app.run(host='0.0.0.0', port=5000, debug=False)
+    logger.info("Arcane Forge API started")
+    app.run(host='0.0.0.0', port=int(os.getenv('PORT', 5000)), debug=False)
