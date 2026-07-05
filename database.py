@@ -44,7 +44,24 @@ def check_database_connection() -> bool:
         return False
 
 
+def _migrate_jobs_columns():
+    """Add character-sheet columns to existing jobs tables (idempotent)."""
+    columns = [
+        ("use_character_sheets", "BOOLEAN DEFAULT 0"),
+        ("party_size", "INTEGER DEFAULT 0"),
+        ("character_sheets", "TEXT"),
+    ]
+    with engine.connect() as conn:
+        for name, col_type in columns:
+            try:
+                conn.execute(text(f"ALTER TABLE jobs ADD COLUMN {name} {col_type}"))
+                conn.commit()
+            except Exception:
+                conn.rollback()
+
+
 def init_db():
     from models import entities  # noqa: F401
 
     Base.metadata.create_all(bind=engine)
+    _migrate_jobs_columns()

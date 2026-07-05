@@ -29,6 +29,8 @@ def create_job_record(
     credits_charged: int,
     idempotency_key: str | None = None,
     system_preset: str | None = None,
+    use_character_sheets: bool = False,
+    party_size: int = 0,
 ) -> Job:
     db = SessionLocal()
     try:
@@ -50,11 +52,25 @@ def create_job_record(
             credits_charged=credits_charged,
             idempotency_key=idempotency_key,
             system_preset=system_preset,
+            use_character_sheets=use_character_sheets,
+            party_size=party_size,
         )
         db.add(job)
         db.commit()
         db.refresh(job)
         return job
+    finally:
+        db.close()
+
+
+def update_job_character_sheets(job_id: str, character_sheets_json: str) -> None:
+    db = SessionLocal()
+    try:
+        job = db.query(Job).filter(Job.id == job_id).first()
+        if not job:
+            return
+        job.character_sheets = character_sheets_json
+        db.commit()
     finally:
         db.close()
 

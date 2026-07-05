@@ -6,7 +6,7 @@ from sqlalchemy.orm import sessionmaker
 
 from database import Base
 from models.entities import CreditTransaction, User
-from services.quota import QuotaError, check_and_deduct, refund_credits
+from services.quota import QuotaError, check_and_deduct, refund_credits, plan_allows_character_sheets
 
 
 @pytest.fixture
@@ -54,3 +54,9 @@ def test_refund_credits(db_setup):
     updated = db.query(User).filter(User.id == user.id).first()
     assert updated.credits_balance == 1
     db.close()
+
+
+def test_plan_allows_character_sheets():
+    assert plan_allows_character_sheets("pro") is True
+    assert plan_allows_character_sheets("studio") is True
+    assert plan_allows_character_sheets("free") is False

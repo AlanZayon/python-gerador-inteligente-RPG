@@ -61,6 +61,24 @@ def upload_pdf_to_s3(local_path: str, filename: str) -> dict:
     return {"s3_key": s3_key, "file_url": presigned_url}
 
 
+def upload_pdf_with_key(local_path: str, s3_key: str) -> dict:
+    """Upload PDF to a specific S3 key."""
+    s3 = _get_s3_client()
+    bucket = _bucket_name()
+    s3.upload_file(
+        Filename=local_path,
+        Bucket=bucket,
+        Key=s3_key,
+        ExtraArgs={"ContentType": "application/pdf"},
+    )
+    presigned_url = s3.generate_presigned_url(
+        ClientMethod="get_object",
+        Params={"Bucket": bucket, "Key": s3_key},
+        ExpiresIn=PRESIGNED_URL_TTL,
+    )
+    return {"s3_key": s3_key, "file_url": presigned_url}
+
+
 def generate_presigned_url(s3_key: str) -> str:
     s3 = _get_s3_client()
     return s3.generate_presigned_url(

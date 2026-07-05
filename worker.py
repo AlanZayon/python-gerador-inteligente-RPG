@@ -8,6 +8,7 @@ Batch mode (GHA): MAX_JOBS=5 python worker.py
 
 import logging
 import os
+import json
 import time
 from datetime import datetime
 
@@ -114,6 +115,8 @@ def process_job(conn, job_id: str) -> None:
             party_level=job_data.get("party_level", ""),
             tone=job_data.get("tone", ""),
             theme=job_data.get("theme", ""),
+            use_character_sheets=job_data.get("use_character_sheets", "").lower() == "true",
+            sheet_s3_keys=json.loads(job_data.get("sheet_s3_keys") or "[]"),
         )
 
         if result:

@@ -27,6 +27,23 @@ def get_system_instructions(preset_id: str | None) -> str:
     return SYSTEM_SECTIONS.get(preset_id or "generic", SYSTEM_SECTIONS["generic"])
 
 
+def _mandatory_sections(character_sheets: str = "") -> str:
+    if character_sheets:
+        return (
+            "Mandatory sections: OVERVIEW, STARTING HOOK, DETAILED SESSIONS "
+            "(each with objectives, encounters, NPCs, treasures — reference each PC by name), "
+            "IMPORTANT NPCS, ENEMIES AND CREATURES, REWARDS, CHALLENGES AND PUZZLES, "
+            "POSSIBLE ENDINGS, MAPS AND LOCATIONS.\n\n"
+            "Tailor hooks, encounters, and rewards to these PLAYER CHARACTERS. "
+            "Replace generic archetypes with personalized plot threads for these characters."
+        )
+    return (
+        "Mandatory sections: OVERVIEW, STARTING HOOK, CHARACTER ARCHETYPES, DETAILED SESSIONS, "
+        "IMPORTANT NPCS, ENEMIES AND CREATURES, REWARDS, CHALLENGES AND PUZZLES, "
+        "POSSIBLE ENDINGS, MAPS AND LOCATIONS."
+    )
+
+
 def build_campaign_prompt(
     *,
     book_bible: dict,
@@ -39,6 +56,7 @@ def build_campaign_prompt(
     theme: str = "",
     pass_type: str = "full",
     outline: str = "",
+    character_sheets: str = "",
 ) -> str:
     system_block = get_system_instructions(system_preset)
     prefs = ""
@@ -50,19 +68,25 @@ def build_campaign_prompt(
         prefs += f"\nOptional theme/hook: {theme}"
 
     bible_json = str(book_bible)[:12000]
+    sections = _mandatory_sections(character_sheets)
+    sheets_block = f"\n\n{character_sheets}\n" if character_sheets else ""
 
     if pass_type == "outline":
+        outline_note = ""
+        if character_sheets:
+            outline_note = "\nInclude personalized hooks for each player character listed below."
         return f"""You are an expert RPG campaign designer.
 
 BOOK ANALYSIS (from the user's uploaded rulebook):
 {bible_json}
-
+{sheets_block}
 SYSTEM RULES:
 {system_block}
 {prefs}
 
 Create a detailed campaign OUTLINE for a {complexity.upper()} campaign in {target_language}.
 {guidelines}
+{outline_note}
 
 Include: title, overview, starting hook, session-by-session bullet outline, key NPCs list, major locations.
 Output in markdown. Language: {target_language}.
@@ -73,7 +97,7 @@ Output in markdown. Language: {target_language}.
 
 BOOK ANALYSIS:
 {bible_json}
-
+{sheets_block}
 SYSTEM RULES:
 {system_block}
 {prefs}
@@ -84,7 +108,7 @@ Expand this outline into a COMPLETE, play-ready campaign in {target_language}:
 OUTLINE TO EXPAND:
 {outline}
 
-Mandatory sections: OVERVIEW, STARTING HOOK, CHARACTER ARCHETYPES, DETAILED SESSIONS (each with objectives, encounters, NPCs, treasures), IMPORTANT NPCS, ENEMIES AND CREATURES, REWARDS, CHALLENGES AND PUZZLES, POSSIBLE ENDINGS, MAPS AND LOCATIONS.
+{sections}
 
 Use markdown. Be specific and table-ready. Language: {target_language}.
 """
@@ -93,7 +117,7 @@ Use markdown. Be specific and table-ready. Language: {target_language}.
 
 BOOK ANALYSIS (from the user's uploaded rulebook):
 {bible_json}
-
+{sheets_block}
 SYSTEM RULES:
 {system_block}
 {prefs}
@@ -101,7 +125,7 @@ SYSTEM RULES:
 Create a COMPLETE, play-ready {complexity.upper()} campaign in {target_language}.
 {guidelines}
 
-Mandatory sections: OVERVIEW, STARTING HOOK, CHARACTER ARCHETYPES, DETAILED SESSIONS, IMPORTANT NPCS, ENEMIES AND CREATURES, REWARDS, CHALLENGES AND PUZZLES, POSSIBLE ENDINGS, MAPS AND LOCATIONS.
+{sections}
 
 Ground the campaign in the book's setting, terminology, and tone from the analysis above.
 Use markdown. Language: {target_language}.

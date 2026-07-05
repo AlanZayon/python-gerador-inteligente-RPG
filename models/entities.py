@@ -45,6 +45,9 @@ class Job(Base):
     share_slug: Mapped[str | None] = mapped_column(String(32), unique=True, nullable=True)
     share_public: Mapped[bool] = mapped_column(Boolean, default=False)
     system_preset: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    use_character_sheets: Mapped[bool] = mapped_column(Boolean, default=False)
+    party_size: Mapped[int] = mapped_column(Integer, default=0)
+    character_sheets: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 

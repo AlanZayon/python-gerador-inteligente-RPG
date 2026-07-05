@@ -6,13 +6,14 @@ import requests
 import os
 import logging
 import uuid
+import json
 import redis
 from datetime import datetime
 
 from database import check_database_connection, init_db
 from tasks.campaign_tasks import is_gemini_configured
 from examples.campaign_samples import get_sample_campaign
-from services.s3_storage import upload_pdf_to_s3, generate_presigned_url, fetch_s3_text, s3_configured
+from services.s3_storage import upload_pdf_to_s3, upload_pdf_with_key, generate_presigned_url, fetch_s3_text, s3_configured
 from services.redis_client import (
     PENDING_JOBS_QUEUE,
     PRIORITY_JOBS_QUEUE,
@@ -28,10 +29,16 @@ from services.validation import (
     validate_language,
     validate_pdf_magic_bytes,
 )
-from services.quota import QuotaError, check_and_deduct, quota_error_response
+from services.quota import QuotaError, check_and_deduct, quota_error_response, plan_allows_character_sheets
 from services.jobs_db import create_job_record, get_job_for_user, get_job_by_share_slug
 from services.legal_content import CONTENT_LICENSE
 from services.system_presets import SYSTEM_PRESETS
+from services.sheet_validation import (
+    clamp_party_size,
+    parse_use_character_sheets,
+    validate_sheet_file_count,
+    validate_sheet_file_size,
+)
 from services.sentry_init import init_sentry
 from routes.billing import billing_bp
 from routes.dashboard import dashboard_bp
@@ -185,6 +192,7 @@ def _verify_job_access(job_id: str) -> tuple[dict | None, tuple | None]:
 def generate_campaign():
     logger.info("Recebendo requisição de geração de campanha...")
     input_pdf = None
+    sheet_temp_paths: list[str] = []
 
     try:
         if 'file' not in request.files:
@@ -203,6 +211,30 @@ def generate_campaign():
         tone = request.form.get('tone', '')
         theme = request.form.get('theme', '')
         idempotency_key = request.headers.get('Idempotency-Key')
+        use_character_sheets = parse_use_character_sheets(request.form.get('use_character_sheets'))
+        party_size = clamp_party_size(request.form.get('party_size')) if use_character_sheets else 0
+        sheet_files = request.files.getlist('sheet_files') if use_character_sheets else []
+
+        if use_character_sheets and not plan_allows_character_sheets(g.user.plan):
+            return quota_error_response(QuotaError(
+                "Plan restriction",
+                {
+                    "error": "plan_restriction",
+                    "message": "Character sheets require Pro or Studio plan.",
+                    "upgrade_url": f"{FRONTEND_URL}/pricing",
+                },
+            ))
+
+        if use_character_sheets:
+            count_err = validate_sheet_file_count(sheet_files, party_size)
+            if count_err:
+                return jsonify({'error': count_err}), 400
+            for sf in sheet_files:
+                if not sf.filename or not allowed_file(sf.filename):
+                    return jsonify({'error': 'All character sheets must be PDF files'}), 400
+                size_err = validate_sheet_file_size(sf)
+                if size_err:
+                    return jsonify({'error': size_err}), 400
 
         if idempotency_key:
             from services.jobs_db import find_idempotent_job
@@ -231,10 +263,27 @@ def generate_campaign():
             os.remove(input_pdf)
             return jsonify({'error': 'File is not a valid PDF'}), 400
 
+        if use_character_sheets:
+            for i, sf in enumerate(sheet_files):
+                sheet_name = secure_filename(sf.filename)
+                sheet_path = os.path.join(app.config['UPLOAD_FOLDER'], f"{job_id}_sheet_{i}_{sheet_name}")
+                sf.save(sheet_path)
+                if not validate_pdf_magic_bytes(sheet_path):
+                    os.remove(sheet_path)
+                    for p in sheet_temp_paths:
+                        if os.path.exists(p):
+                            os.remove(p)
+                    os.remove(input_pdf)
+                    return jsonify({'error': f'Character sheet {i + 1} is not a valid PDF'}), 400
+                sheet_temp_paths.append(sheet_path)
+
         try:
             credits_charged = check_and_deduct(g.user, campaign_complexity, job_id)
         except QuotaError as exc:
             os.remove(input_pdf)
+            for p in sheet_temp_paths:
+                if os.path.exists(p):
+                    os.remove(p)
             return quota_error_response(exc)
 
         existing = create_job_record(
@@ -246,10 +295,15 @@ def generate_campaign():
             credits_charged=credits_charged,
             idempotency_key=idempotency_key,
             system_preset=system_preset,
+            use_character_sheets=use_character_sheets,
+            party_size=party_size if use_character_sheets else 0,
         )
         if existing.id != job_id:
             if input_pdf and os.path.exists(input_pdf):
                 os.remove(input_pdf)
+            for p in sheet_temp_paths:
+                if os.path.exists(p):
+                    os.remove(p)
             return jsonify({
                 'success': True,
                 'job_id': existing.id,
@@ -261,11 +315,19 @@ def generate_campaign():
         os.remove(input_pdf)
         input_pdf = None
 
+        sheet_s3_keys: list[str] = []
+        for i, sheet_path in enumerate(sheet_temp_paths):
+            s3_key = f"sheets/{job_id}/pc_{i}.pdf"
+            upload_pdf_with_key(sheet_path, s3_key)
+            sheet_s3_keys.append(s3_key)
+            os.remove(sheet_path)
+        sheet_temp_paths.clear()
+
         if redis_conn is None:
             return jsonify({'error': 'Redis unavailable. Check REDIS_URL and restart the API.'}), 503
 
         job_key = f"rpg:job:{job_id}"
-        redis_conn.hset(job_key, mapping={
+        redis_mapping = {
             "job_id": job_id,
             "user_id": g.user.id,
             "file_url": upload_result["file_url"],
@@ -280,7 +342,11 @@ def generate_campaign():
             "credits_charged": str(credits_charged),
             "status": "queued",
             "created_at": datetime.utcnow().isoformat(),
-        })
+            "use_character_sheets": "true" if use_character_sheets else "false",
+            "party_size": str(party_size),
+            "sheet_s3_keys": json.dumps(sheet_s3_keys),
+        }
+        redis_conn.hset(job_key, mapping=redis_mapping)
 
         queue_name = _queue_for_plan(g.user.plan)
         redis_conn.rpush(queue_name, job_id)
@@ -307,6 +373,12 @@ def generate_campaign():
         if input_pdf and os.path.exists(input_pdf):
             try:
                 os.remove(input_pdf)
+            except Exception:
+                pass
+        for p in sheet_temp_paths:
+            try:
+                if os.path.exists(p):
+                    os.remove(p)
             except Exception:
                 pass
         return jsonify({'error': _error_message(e)}), 500

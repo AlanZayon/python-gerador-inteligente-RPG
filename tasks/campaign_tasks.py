@@ -22,7 +22,15 @@ from services.book_analysis import build_book_bible, format_inspired_block
 from services.campaign_quality import validate_campaign
 from services.job_status import mark_failed, mark_processing, save_result, save_status
 from services.prompt_templates import build_campaign_prompt, build_expand_retry_prompt
-from services.s3_storage import upload_content_to_s3
+from services.s3_storage import upload_content_to_s3, generate_presigned_url
+from services.sheet_extraction import (
+    extract_pdf_text,
+    parse_character_sheet,
+    format_sheets_for_prompt,
+    extract_character_names,
+)
+from services.sheet_validation import validate_sheets_json_size
+from services.jobs_db import update_job_character_sheets
 
 logging.basicConfig(
     level=logging.INFO,
@@ -49,6 +57,7 @@ PROGRESS_STAGES = {
     "download": (5, "Downloading your rulebook..."),
     "validate": (10, "Validating PDF pages..."),
     "extract": (15, "Extracting text from PDF..."),
+    "sheets": (20, "Reading character sheets..."),
     "analyze": (30, "Analyzing your book..."),
     "outline": (50, "Building campaign outline..."),
     "generate": (75, "Weaving your campaign..."),
@@ -212,6 +221,39 @@ def generate_fallback_campaign(complexity, language):
     return format_campaign_output(content, complexity, language)
 
 
+def _process_character_sheets(
+    job_id: str,
+    sheet_s3_keys: list[str],
+    system_preset: str | None,
+) -> tuple[list[dict], str, list[str]]:
+    """Download, extract, and parse character sheet PDFs."""
+    sheets: list[dict] = []
+    for i, s3_key in enumerate(sheet_s3_keys):
+        file_url = generate_presigned_url(s3_key)
+        local_path = download_file_from_s3(file_url, f"{job_id}_sheet_{i}")
+        try:
+            text = extract_pdf_text(local_path)
+            if not text or len(text.strip()) < 20:
+                mark_failed(job_id, f"Insufficient text in character sheet {i + 1}.")
+                cleanup_temp_files(local_path)
+                return [], "", []
+            parsed = parse_character_sheet(text, system_preset)
+            sheets.append(parsed)
+        finally:
+            cleanup_temp_files(local_path)
+
+    size_err = validate_sheets_json_size(sheets)
+    if size_err:
+        mark_failed(job_id, size_err)
+        return [], "", []
+
+    sheets_json = json.dumps(sheets, ensure_ascii=False)
+    update_job_character_sheets(job_id, sheets_json)
+    sheets_block = format_sheets_for_prompt(sheets)
+    names = extract_character_names(sheets)
+    return sheets, sheets_block, names
+
+
 def _generate_campaign_content(
     book_bible: dict,
     book_text: str,
@@ -222,6 +264,8 @@ def _generate_campaign_content(
     tone: str = "",
     theme: str = "",
     job_id: str | None = None,
+    character_sheets: str = "",
+    character_names: list[str] | None = None,
 ) -> tuple[str, dict]:
     """Multi-pass generation. Returns (markdown, metadata)."""
     if not GEMINI_CONFIGURED:
@@ -249,6 +293,7 @@ def _generate_campaign_content(
             tone=tone,
             theme=theme,
             pass_type="outline",
+            character_sheets=character_sheets,
         )
         outline = _call_gemini(model_name, outline_prompt)
         if job_id:
@@ -264,6 +309,7 @@ def _generate_campaign_content(
             theme=theme,
             pass_type="expand",
             outline=outline,
+            character_sheets=character_sheets,
         )
         content = _call_gemini(model_name, expand_prompt)
     elif campaign_complexity == "mediana":
@@ -279,6 +325,7 @@ def _generate_campaign_content(
             tone=tone,
             theme=theme,
             pass_type="outline",
+            character_sheets=character_sheets,
         )
         outline = _call_gemini(model_name, outline_prompt)
         expand_prompt = build_campaign_prompt(
@@ -292,6 +339,7 @@ def _generate_campaign_content(
             theme=theme,
             pass_type="expand",
             outline=outline,
+            character_sheets=character_sheets,
         )
         content = _call_gemini(model_name, expand_prompt)
     else:
@@ -307,19 +355,24 @@ def _generate_campaign_content(
             tone=tone,
             theme=theme,
             pass_type="full",
+            character_sheets=character_sheets,
         )
         content = _call_gemini(model_name, prompt)
 
     if job_id:
         _update_progress(job_id, "validate_out")
 
-    passed, issues, score = validate_campaign(content, campaign_complexity)
+    passed, issues, score = validate_campaign(
+        content, campaign_complexity, character_names=character_names
+    )
     meta["quality_score"] = score
     if not passed:
         logger.info("Quality retry for job: %s", issues)
         retry_prompt = build_expand_retry_prompt(content, issues, target_language)
         content = _call_gemini(model_name, retry_prompt)
-        passed, issues, score = validate_campaign(content, campaign_complexity)
+        passed, issues, score = validate_campaign(
+            content, campaign_complexity, character_names=character_names
+        )
         meta["quality_score"] = score
         if not passed:
             raise GenerationFailedError(
@@ -352,9 +405,14 @@ def process_campaign_generation(
     party_level="",
     tone="",
     theme="",
+    use_character_sheets=False,
+    sheet_s3_keys=None,
 ):
     local_file_path = None
     timings: dict[str, int] = {}
+    sheet_s3_keys = sheet_s3_keys or []
+    character_sheets_block = ""
+    character_names: list[str] = []
 
     try:
         t0 = time.time()
@@ -381,6 +439,17 @@ def process_campaign_generation(
             cleanup_temp_files(local_file_path)
             return None
 
+        if use_character_sheets and sheet_s3_keys:
+            t0 = time.time()
+            _update_progress(job_id, "sheets")
+            _sheets, character_sheets_block, character_names = _process_character_sheets(
+                job_id, sheet_s3_keys, system_preset
+            )
+            if not _sheets:
+                cleanup_temp_files(local_file_path)
+                return None
+            timings["sheets_ms"] = int((time.time() - t0) * 1000)
+
         t0 = time.time()
         _update_progress(job_id, "analyze")
         bible_model = GEMINI_MODEL_LITE if GEMINI_CONFIGURED else None
@@ -406,6 +475,8 @@ def process_campaign_generation(
             tone=tone,
             theme=theme,
             job_id=job_id,
+            character_sheets=character_sheets_block,
+            character_names=character_names or None,
         )
         timings["generate_ms"] = int((time.time() - t0) * 1000)
 

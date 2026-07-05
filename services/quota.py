@@ -16,6 +16,8 @@ CREDIT_COSTS = {
 
 FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:5173")
 
+MAX_PARTY_SIZE = 5
+
 
 class QuotaError(Exception):
     def __init__(self, message: str, payload: dict):
@@ -31,6 +33,10 @@ def plan_allows_complexity(plan: str, complexity: str) -> bool:
     if plan == "free" and complexity != "simples":
         return False
     return True
+
+
+def plan_allows_character_sheets(plan: str) -> bool:
+    return plan in ("pro", "studio")
 
 
 def check_and_deduct(user: User, complexity: str, job_id: str) -> int:

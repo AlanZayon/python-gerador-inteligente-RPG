@@ -56,6 +56,8 @@ def get_jobs():
                 "created_at": j.created_at.isoformat() if j.created_at else None,
                 "completed_at": j.completed_at.isoformat() if j.completed_at else None,
                 "share_slug": j.share_slug if j.share_public else None,
+                "use_character_sheets": j.use_character_sheets,
+                "party_size": j.party_size,
             }
             for j in jobs
         ],
