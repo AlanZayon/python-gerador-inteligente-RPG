@@ -1,0 +1,55 @@
+You are an expert RPG campaign designer.
+
+BOOK CONTEXT (excerpts from the user's rulebook — use these as primary source material):
+--- Excerpt 1 (relevance 0.84) ---
+The drowned city of Valdris rises once per century when the black moon eclipses the sun.
+Ancient aqueducts still carry saltwater through marble halls. The Council of Tides rules
+from the Sunken Basilica, where priests of Umberlee conduct rituals to keep the city
+from collapsing back into the abyss. Common threats include sahuagin raiders, cursed
+shipwreck souls, and the Crimson Kelp — a sentient algae that whispers promises of power.
+
+--- Excerpt 2 (relevance 0.79) ---
+Character levels 3-5 are appropriate for exploring the upper districts. Encounters should
+mix social intrigue (nobles trading salvage rights) with underwater delves. Rest rules:
+short rest in dry pockets of air; long rest only at surface camps or enchanted domes.
+
+--- Excerpt 3 (relevance 0.71) ---
+Treasure tables for coastal ruins include coral-inlaid weapons, pearls of breathing,
+and maps to the Deep Archive — a library sealed since the city's fall.
+
+PLAYER CHARACTER SHEETS:
+### Player 1
+Name: Mira Thornwood
+Class: Rogue 4
+Background: Sailor
+Skills: Stealth, Perception, Sleight of Hand
+Hook: Owes a debt to a sahuagin prince
+
+### Player 2
+Name: Brother Aldric
+Class: Cleric 3 (Tempest Domain)
+Deity: Umberlee
+Hook: Visions of the Sunken Basilica
+
+CAMPAIGN REQUEST:
+Theme: dark fantasy
+Campaign hook: Uma cidade submersa ressurge quando a lua negra eclipsa o sol
+Tone: grim but hopeful
+Party level: 3-5
+
+SYSTEM RULES:
+- Use system-agnostic fantasy terminology
+- Reference ability checks and difficulty classes without brand names
+
+Create a COMPLETE, play-ready MEDIANA campaign in pt.
+- 3-4 sessions of play
+- Branching choices, concrete encounters
+- Ground NPCs and locations in the book excerpts below
+
+Mandatory sections: OVERVIEW, STARTING HOOK, DETAILED SESSIONS (each with objectives, encounters, NPCs, treasures — reference each PC by name), IMPORTANT NPCS, ENEMIES AND CREATURES, REWARDS, CHALLENGES AND PUZZLES, POSSIBLE ENDINGS, MAPS AND LOCATIONS.
+
+Tailor hooks, encounters, and rewards to these PLAYER CHARACTERS. Replace generic archetypes with personalized plot threads for these characters.
+
+Ground the campaign in the book excerpts above. Use their terminology, setting, and tone.
+Do not invent a generic fantasy world if the excerpts describe something specific.
+Output in markdown. Language: pt.

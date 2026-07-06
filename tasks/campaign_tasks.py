@@ -452,6 +452,7 @@ def process_campaign_generation(
 
         t0 = time.time()
         _update_progress(job_id, "analyze")
+        # TODO: USE_RAG=true → skip build_book_bible, index PDF once, use services.rag.generator
         bible_model = GEMINI_MODEL_LITE if GEMINI_CONFIGURED else None
         book_bible = build_book_bible(book_text, model_name=bible_model or GEMINI_MODEL_LITE)
         timings["analyze_ms"] = int((time.time() - t0) * 1000)

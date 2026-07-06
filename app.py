@@ -42,6 +42,7 @@ from services.sheet_validation import (
 from services.sentry_init import init_sentry
 from routes.billing import billing_bp
 from routes.dashboard import dashboard_bp
+from routes.rag import rag_bp
 
 load_dotenv()
 validate_production_auth_config()
@@ -71,6 +72,7 @@ app = Flask(__name__)
 CORS(app, origins=[o.strip() for o in CORS_ORIGINS if o.strip()])
 app.register_blueprint(billing_bp)
 app.register_blueprint(dashboard_bp)
+app.register_blueprint(rag_bp, url_prefix="/rag")
 
 UPLOAD_FOLDER = 'uploads/'
 CAMPAIGN_FOLDER = 'campaigns/'

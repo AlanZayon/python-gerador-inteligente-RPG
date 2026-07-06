@@ -27,6 +27,9 @@ uploads/
 campaigns/
 job_status/
 
+# RAG indexes (local FAISS + chunks)
+data/indexes/
+
 # Logs
 *.log
 logs/
@@ -34,3 +37,8 @@ logs/
 # System
 .DS_Store
 Thumbs.db
+
+models/
+*.gguf
+*.pdf
+arcane_forge.db
