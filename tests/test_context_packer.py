@@ -70,3 +70,15 @@ def test_extract_key_terms_from_capitalized_names():
     terms = extract_key_terms("The city of Valdris fights the Sahuagin Court near Emberfall.")
     assert "Valdris" in terms
     assert "Sahuagin" in terms
+
+
+def test_extract_key_terms_ignores_packer_headings():
+    terms = extract_key_terms(
+        "## Setting and tone\n### Excerpt 1\nThe city of Valdris drowns.\n"
+        "Algumas campanhas. Assim o Mestre. Forgotten Realms names stay."
+    )
+    assert "Valdris" in terms
+    assert "Setting" not in terms
+    assert "Excerpt" not in terms
+    assert "Algumas" not in terms
+    assert "Mestre" not in terms

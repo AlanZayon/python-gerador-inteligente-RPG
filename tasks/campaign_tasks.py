@@ -383,10 +383,17 @@ def _generate_campaign_content(
         key_terms=key_terms,
     )
     meta["quality_score"] = score
-    if not passed:
-        logger.info("Quality retry for job: %s", issues)
+    quality_retries = 2
+    attempt = 0
+    while not passed and attempt < quality_retries:
+        attempt += 1
+        logger.info("Quality retry %s for job: %s", attempt, issues)
         retry_prompt = build_expand_retry_prompt(
-            content, issues, target_language, key_terms=key_terms
+            content,
+            issues,
+            target_language,
+            key_terms=key_terms,
+            complexity=campaign_complexity,
         )
         content = _call_llm(model_name, retry_prompt)
         passed, issues, score = validate_campaign(
@@ -396,10 +403,10 @@ def _generate_campaign_content(
             key_terms=key_terms,
         )
         meta["quality_score"] = score
-        if not passed:
-            raise GenerationFailedError(
-                f"Campaign quality below threshold: {'; '.join(issues)}"
-            )
+    if not passed:
+        raise GenerationFailedError(
+            f"Campaign quality below threshold: {'; '.join(issues)}"
+        )
 
     inspired = format_inspired_block(book_bible)
     meta["word_count"] = len(content.split())

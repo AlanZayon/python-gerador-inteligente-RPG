@@ -9,7 +9,7 @@ MIN_WORDS = {
 }
 
 REQUIRED_SECTIONS = [
-    r"overview|visão geral|visao geral",
+    r"overview|visão geral|visao geral|resumo",
     r"session|sessão|sessao",
     r"npc",
 ]
@@ -26,14 +26,37 @@ def word_count(text: str) -> int:
 
 
 def count_sessions(text: str) -> int:
-    matches = re.findall(
-        r"(?:session|sessão|sessao)\s*#?\s*(\d+)",
-        text,
-        re.IGNORECASE,
+    nums = [
+        int(m)
+        for m in re.findall(
+            r"(?:session|sessão|sessao)\s*#?\s*(\d+)",
+            text,
+            re.IGNORECASE,
+        )
+    ]
+    if nums:
+        return max(nums)
+    return len(
+        re.findall(
+            r"^#+\s*(?:session|sessão|sessao)\b",
+            text,
+            re.IGNORECASE | re.MULTILINE,
+        )
     )
-    if matches:
-        return max(int(m) for m in matches)
-    return len(re.findall(r"##\s*(?:Session|Sessão|Sessao)\s*\d", text, re.IGNORECASE))
+
+
+def quality_requirements(complexity: str) -> str:
+    min_w = MIN_WORDS.get(complexity, 2000)
+    lo, _hi = SESSION_COUNTS.get(complexity, (3, 5))
+    return (
+        f"HARD REQUIREMENTS (rejected if missing):\n"
+        f"- Write at least {min_w} words. Do not summarize. Write full playable detail.\n"
+        f"- Include markdown heading `## Overview` (or `## Visão Geral` in Portuguese).\n"
+        f"- Include at least {lo} sessions as headings: `## Session 1` ... `## Session {lo}` "
+        f"(or `## Sessão 1` ...).\n"
+        f"- Include a heading containing NPC (e.g. `## Important NPCs`).\n"
+        f"- Each session needs objectives, encounters, NPCs, and treasures in multiple paragraphs."
+    )
 
 
 def validate_campaign(

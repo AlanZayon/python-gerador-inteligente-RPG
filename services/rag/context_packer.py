@@ -21,6 +21,41 @@ _STOP = {
     "from",
     "this",
     "that",
+    "setting",
+    "excerpt",
+    "excerpts",
+    "mechanics",
+    "locations",
+    "factions",
+    "creatures",
+    "theme",
+    "relevant",
+    "tone",
+    "overview",
+    "session",
+    "campanhas",
+    "algumas",
+    "outras",
+    "assim",
+    "mestre",
+    "jogador",
+    "jogadores",
+    "quando",
+    "onde",
+    "como",
+    "para",
+    "pela",
+    "pelo",
+    "este",
+    "esta",
+    "esse",
+    "essa",
+    "isso",
+    "aqui",
+    "ability",
+    "checks",
+    "difficulty",
+    "class",
 }
 
 
@@ -166,7 +201,7 @@ def pack_lanes(
     sections = [_format_lane(titles[lane], selected[lane]) for lane in LANES]
     used_chunks = [c for lane in LANES for c in selected[lane]]
     book_context = "\n\n".join(sections)
-    terms = extract_key_terms(book_context)
+    terms = extract_key_terms("\n".join(c.get("text") or "" for c in used_chunks))
     if terms:
         book_context += "\n\n## Key terms\n" + ", ".join(terms)
 

@@ -1,5 +1,7 @@
 """Campaign generation prompt templates by RPG system."""
 
+from services.campaign_quality import quality_requirements
+
 SYSTEM_SECTIONS = {
     "generic": """
 - Use system-agnostic fantasy terminology
@@ -76,6 +78,7 @@ def build_campaign_prompt(
     )
     sections = _mandatory_sections(character_sheets)
     sheets_block = f"\n\n{character_sheets}\n" if character_sheets else ""
+    requirements = quality_requirements(complexity)
 
     if pass_type == "outline":
         outline_note = ""
@@ -92,6 +95,7 @@ SYSTEM RULES:
 
 Create a detailed campaign OUTLINE for a {complexity.upper()} campaign in {target_language}.
 {guidelines}
+{requirements}
 {outline_note}
 
 {grounding}
@@ -112,6 +116,7 @@ SYSTEM RULES:
 
 Expand this outline into a COMPLETE, play-ready campaign in {target_language}:
 {guidelines}
+{requirements}
 
 OUTLINE TO EXPAND:
 {outline}
@@ -133,6 +138,7 @@ SYSTEM RULES:
 
 Create a COMPLETE, play-ready {complexity.upper()} campaign in {target_language}.
 {guidelines}
+{requirements}
 
 {sections}
 
@@ -146,20 +152,26 @@ def build_expand_retry_prompt(
     issues: list[str],
     target_language: str,
     key_terms: list[str] | None = None,
+    complexity: str = "mediana",
 ) -> str:
     issue_list = "\n".join(f"- {i}" for i in issues)
     terms_note = ""
     if key_terms:
         terms_note = (
-            "\nWeave in these terms from the source book: "
+            "\nWeave in these proper names from the source book: "
             + ", ".join(key_terms[:10])
             + "\n"
         )
-    return f"""Improve this RPG campaign draft. Fix these quality issues:
+    requirements = quality_requirements(complexity)
+    return f"""Rewrite the COMPLETE play-ready RPG campaign in {target_language}.
+Do not return a summary, a patch, or a list of changes. Output the full markdown campaign.
+
+Fix these issues:
 {issue_list}
 {terms_note}
-Expand missing sections. Target language: {target_language}.
-Reuse names and mechanics from the source book; do not replace them with generic fantasy.
+{requirements}
+
+Keep useful content from the draft below and expand it until every requirement is met.
 
 DRAFT:
 {content[:25000]}
