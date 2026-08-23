@@ -22,6 +22,24 @@ SYSTEM_SECTIONS = {
 - Clues must be discoverable; avoid combat-only solutions
 - Tone: creeping dread, 1920s–modern era as appropriate
 """,
+    "gurps": """
+- Use GURPS Lite: ST/DX/IQ/HT, skills, advantages/disadvantages, 3d6 roll-under
+- Quote specific skill names and modifiers; mention character-point costs when relevant
+- Do not assume dungeon fantasy; match the book's genre
+- Combat is lethal; social and investigative scenes must be equally playable
+""",
+    "blood_honor": """
+- Center clan, honor, court, and personal obligation — not dungeon crawls
+- Conflicts should be social and political first; violence is rare, named, and costly
+- Reuse the book's procedures (risks, aspects, gifts, clan holdings) instead of D&D-style DCs
+- Tragedy means choices have irreversible social consequences
+""",
+    "fragged": """
+- Keep a post-collapse science-fiction identity: remnant corporations, modified cultures, resources
+- Use the book's procedures (resources, spare time, influence, spacecraft) rather than medieval fantasy tropes
+- Faction politics and scarcity drive play more than monster-of-the-week
+- Do not reskin knights and dungeons as spaceships
+""",
 }
 
 
@@ -179,3 +197,206 @@ Keep useful content from the draft below and expand it until every requirement i
 DRAFT:
 {content[:80000]}
 """
+
+
+def build_plan_prompt(
+    *,
+    book_context: str,
+    target_language: str,
+    complexity: str,
+    guidelines: str,
+    system_preset: str | None,
+    party_level: str = "",
+    tone: str = "",
+    theme: str = "",
+    character_sheets: str = "",
+    json_instructions: str = "",
+) -> str:
+    from services.campaign_schema import PLAN_JSON_INSTRUCTIONS, spec_for
+
+    spec = spec_for(complexity)
+    system_block = get_system_instructions(system_preset)
+    prefs = []
+    if party_level:
+        prefs.append(f"Party level: {party_level}")
+    if tone:
+        prefs.append(f"Tone: {tone}")
+    if theme:
+        prefs.append(f"Theme/hook: {theme}")
+    prefs_block = "\n".join(prefs)
+    sheets_block = f"\nPLAYER CHARACTERS:\n{character_sheets}\n" if character_sheets else ""
+    schema = json_instructions or PLAN_JSON_INSTRUCTIONS
+    return f"""You are a senior RPG campaign planner. Do NOT write the playable manuscript yet.
+Build a structured plan that later writers will expand. Invent nothing that contradicts the book excerpts.
+If the excerpts describe a specific setting, reuse its names. If they are mostly rules, invent a setting that obeys those rules.
+
+BOOK EXCERPTS:
+{book_context}
+{sheets_block}
+SYSTEM:
+{system_block}
+{prefs_block}
+
+COMPLEXITY: {complexity}
+{guidelines}
+Depth target: {spec['description']}
+Minimums: sessions {spec['sessions'][0]}+, NPCs {spec['min_npcs']}+, factions {spec['min_factions']}+, locations {spec['min_locations']}+, fronts {spec['min_fronts']}+, endings {spec['min_endings']}+.
+
+Rules:
+- Every NPC has a want, a secret, and a tie to the conflict.
+- Every scene lists at least two approaches and a failure consequence.
+- Mysteries include at least three independent clues when complexity is mediana or complexa.
+- grounded_terms must be copied verbatim from the excerpts when names exist.
+- Output language for string values: {target_language}.
+
+{schema}
+"""
+
+
+def build_overview_prompt(
+    *,
+    digest: str,
+    book_context: str,
+    target_language: str,
+    system_preset: str | None,
+    overview_label: str,
+    hook_label: str,
+) -> str:
+    system_block = get_system_instructions(system_preset)
+    return f"""You are writing the opening of a play-ready RPG campaign for a GM.
+Use ONLY names from the campaign state. Do not rename anyone.
+
+CAMPAIGN STATE:
+{digest}
+
+SYSTEM:
+{system_block}
+
+BOOK EXCERPTS (grounding):
+{book_context[:6000]}
+
+Write markdown with exactly these headings and no others:
+# {{title from state}}
+## {overview_label}
+## {hook_label}
+
+Overview: premise, thematic question, central conflict, stakes, faction pressures, how the campaign escalates.
+Starting hook: a situation already in motion, what the PCs see, a first choice.
+Language: {target_language}. No code fences.
+"""
+
+
+def build_session_prompt(
+    *,
+    digest: str,
+    session_json: str,
+    previous_summary: str,
+    extra_context: str,
+    target_language: str,
+    system_preset: str | None,
+    session_label: str,
+    objectives_label: str,
+) -> str:
+    system_block = get_system_instructions(system_preset)
+    extra = extra_context.strip() or "(no extra excerpts)"
+    prev = previous_summary.strip() or "(this is the opening session)"
+    return f"""You are writing ONE playable session for a GM. Expand the session brief; do not invent a new plot.
+
+CAMPAIGN STATE (continuity bible):
+{digest}
+
+THIS SESSION BRIEF:
+{session_json}
+
+PREVIOUS SESSIONS:
+{prev}
+
+EXTRA BOOK EXCERPTS:
+{extra}
+
+SYSTEM:
+{system_block}
+
+Write markdown starting with:
+## {session_label} {{number}}: {{title}}
+
+Include:
+- **{objectives_label}:** bullet list
+- Scenes as ### headings. Each scene: what is happening, who is present, at least two approaches, failure consequences, and any clue found here.
+- A boxed GM note with a check/DC or system procedure from the book.
+- An explicit branch: If the players do A... / If they do B...
+- How this session advances a front.
+
+Reuse names exactly. Language: {target_language}. No code fences. No other H2 headings.
+"""
+
+
+def build_support_prompt(
+    *,
+    digest: str,
+    book_context: str,
+    target_language: str,
+    system_preset: str | None,
+    labels: dict[str, str],
+) -> str:
+    system_block = get_system_instructions(system_preset)
+    return f"""You are writing the reference appendix of a play-ready RPG campaign.
+Use ONLY names from the campaign state.
+
+CAMPAIGN STATE:
+{digest}
+
+SYSTEM:
+{system_block}
+
+BOOK EXCERPTS:
+{book_context[:5000]}
+
+Write markdown with these H2 headings in this order (and no extra H2s):
+## {labels['npcs']}
+## {labels['enemies']}
+## {labels['puzzles']}
+## {labels['endings']}
+## {labels['maps']}
+## {labels['rewards']}
+
+NPCs: ### Name, **Role**, want, secret, tell, relationship, how they act if pressured.
+Enemies: factions and opposition as usable GM tools, not generic stat spam.
+Challenges: clocks, mysteries, three-clue paths, social/stealth/force options.
+Endings: one subsection per planned ending with the condition that produces it.
+Maps: sensory locations and how they connect.
+Rewards: diegetic, useful, tied to choices.
+Language: {target_language}. No code fences.
+"""
+
+
+def build_revise_prompt(
+    *,
+    digest: str,
+    section_heading: str,
+    section_body: str,
+    issues: list[str],
+    target_language: str,
+    system_preset: str | None,
+) -> str:
+    system_block = get_system_instructions(system_preset)
+    issue_list = "\n".join(f"- {i}" for i in issues) or "- Add specific, playable detail"
+    return f"""Revise ONLY this campaign section. Keep the heading. Keep every established name.
+Do not rewrite the rest of the campaign.
+
+CAMPAIGN STATE:
+{digest}
+
+SYSTEM:
+{system_block}
+
+ISSUES TO FIX:
+{issue_list}
+
+SECTION:
+## {section_heading}
+{section_body}
+
+Return the full revised section including the H2 heading. Language: {target_language}. No code fences.
+"""
+

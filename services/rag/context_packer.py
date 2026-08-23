@@ -90,7 +90,7 @@ def _dedup_lane(chunks: list[dict]) -> list[dict]:
 
 
 def extract_key_terms(text: str, limit: int = 10) -> list[str]:
-    words = re.findall(r"\b[A-Z][a-zA-Z]{3,}\b", text or "")
+    words = re.findall(r"\b[A-ZÁÉÍÓÚÂÊÔÃÕ][A-Za-záéíóúâêôãõç]{3,}\b", text or "")
     seen: set[str] = set()
     terms: list[str] = []
     for word in words:
@@ -246,3 +246,7 @@ def pack_campaign_context(
         )
         packed = pack_lanes(lanes, complexity=complexity)
     return packed
+
+
+# Alias used by older tests
+extract_key_terms = extract_key_terms

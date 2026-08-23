@@ -12,7 +12,9 @@ Frontend (Vue) → Flask API → Redis queue → worker.py → S3 + 9router
 
 - **API** (`app.py`) — upload, enqueue, job status, dashboard, billing
 - **Worker** (`worker.py`) — consumes priority/standard queues, runs pipeline
-- **Tasks** (`tasks/campaign_tasks.py`) — PDF extract → AI → Markdown → S3
+- **Tasks** (`tasks/campaign_tasks.py`) — PDF extract → RAG → plan/write/revise → Markdown → S3
+
+Campaign quality pipeline (plan JSON, Campaign State, rubric, selective revision): [docs/CAMPAIGN_GENERATION.md](docs/CAMPAIGN_GENERATION.md)
 
 ## Quick start (local)
 

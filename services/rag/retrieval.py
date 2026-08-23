@@ -20,6 +20,18 @@ _MECHANICS_QUERIES = {
         "occupation"
     ),
     "generic": "RPG game mechanics combat skills magic rules checks difficulty",
+    "gurps": (
+        "GURPS attributes ST DX IQ HT skills advantages disadvantages 3d6 "
+        "character points success rolls modifiers"
+    ),
+    "blood_honor": (
+        "honor clan daimyo court gifts risk aspects bushido social conflict "
+        "samurai tragedy koku"
+    ),
+    "fragged": (
+        "resources spare time spacecraft corporations races combat influence "
+        "post-collapse science fiction"
+    ),
 }
 
 _SETTING_QUERY = (

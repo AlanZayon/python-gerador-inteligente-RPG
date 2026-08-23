@@ -24,6 +24,24 @@ SYSTEM_PRESETS = {
         "description": "Investigation horror with Sanity and skill percentiles",
         "prompt_hint": "Use Call of Cthulhu tone: investigation, Sanity checks, creeping dread, 1920s–modern era.",
     },
+    "gurps": {
+        "id": "gurps",
+        "name": "GURPS",
+        "description": "Generic Universal RolePlaying System — point-buy, 3d6, genre-flexible",
+        "prompt_hint": "Use GURPS Lite procedures: ST DX IQ HT, skills, advantages/disadvantages, 3d6 roll-under, character points. Do not default to dungeon fantasy unless the book or theme asks for it.",
+    },
+    "blood_honor": {
+        "id": "blood_honor",
+        "name": "Blood & Honor",
+        "description": "Samurai tragedy: clan, honor, court, and costly violence",
+        "prompt_hint": "Center clan politics, honor, gifts, and social risk. Violence is rare, personal, and expensive. Do not generate a dungeon crawl.",
+    },
+    "fragged": {
+        "id": "fragged",
+        "name": "Fragged Empire",
+        "description": "Post-corporate science fiction: remnant cultures, resources, spacecraft",
+        "prompt_hint": "Keep a distinct post-collapse science-fiction identity: corporations as ruins, modified cultures, resources, and spacecraft. Do not reskin medieval fantasy.",
+    },
 }
 
 

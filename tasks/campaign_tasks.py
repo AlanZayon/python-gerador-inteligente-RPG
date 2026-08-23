@@ -150,9 +150,24 @@ def extract_text_from_pdf(file_path):
 
 def get_complexity_guidelines(complexity):
     guidelines = {
-        "simple": "- 1-2 sessions of 3-4 hours\n- Linear story, 2-3 encounters\n- 1-2 NPCs, 1 main location",
-        "medium": "- 3-4 sessions\n- Branching choices, 4-6 encounters\n- 3-5 NPCs, 2-3 locations",
-        "complex": "- 5+ sessions\n- Non-linear arcs, 8+ encounters\n- 6+ NPCs, 4+ locations, multiple endings",
+        "simple": (
+            "- 1-2 sessions of 3-4 hours\n"
+            "- One complete arc with a concrete premise, antagonist, and two possible endings\n"
+            "- At least 4 named NPCs with wants; 2 factions; 3 locations\n"
+            "- Every scene lists two approaches and a failure consequence"
+        ),
+        "medium": (
+            "- 3-4 sessions\n"
+            "- Main arc plus at least one subplot; 3 factions with off-screen pressure\n"
+            "- Player choices in session N change session N+1\n"
+            "- Mysteries use at least three independent clues"
+        ),
+        "complex": (
+            "- 5-7 sessions\n"
+            "- Interlocking fronts, rival antagonists, persistent consequences\n"
+            "- At least two mysteries, 4 factions, and 4 distinct endings\n"
+            "- The world advances if a front is ignored"
+        ),
     }
     complexity_map = {"simples": "simple", "mediana": "medium", "complexa": "complex"}
     english = complexity_map.get(complexity.lower(), complexity.lower())
@@ -280,92 +295,55 @@ def _generate_campaign_content(
     if job_id:
         _update_progress(job_id, "outline")
 
-    if campaign_complexity == "complexa":
-        outline_prompt = build_campaign_prompt(
-            **_prompt_kwargs(
-                book_context,
-                target_language,
-                campaign_complexity,
-                guidelines,
-                system_preset,
-                party_level,
-                tone,
-                theme,
-                character_sheets,
-                "outline",
-            )
+    from services.campaign_pipeline import generate_campaign_markdown
+
+    def _llm(prompt: str) -> str:
+        return _call_llm(model_name, prompt)
+
+    def _retrieve(query: str) -> str:
+        book_id = book_bible.get("book_id")
+        if not book_id:
+            return ""
+        try:
+            from services.rag.retrieval import retrieve
+
+            chunks = retrieve(book_id, theme=query, hook="", top_k=3)
+            return "\n\n".join((c.get("text") or "") for c in chunks[:3])
+        except Exception:
+            return ""
+
+    fallback_prompt = build_campaign_prompt(
+        **_prompt_kwargs(
+            book_context,
+            target_language,
+            campaign_complexity,
+            guidelines,
+            system_preset,
+            party_level,
+            tone,
+            theme,
+            character_sheets,
+            "full",
         )
-        outline = _call_llm(model_name, outline_prompt)
-        if job_id:
-            _update_progress(job_id, "generate")
-        expand_prompt = build_campaign_prompt(
-            **_prompt_kwargs(
-                book_context,
-                target_language,
-                campaign_complexity,
-                guidelines,
-                system_preset,
-                party_level,
-                tone,
-                theme,
-                character_sheets,
-                "expand",
-                outline=outline,
-            )
-        )
-        content = _call_llm(model_name, expand_prompt)
-    elif campaign_complexity == "mediana":
-        if job_id:
-            _update_progress(job_id, "generate")
-        outline_prompt = build_campaign_prompt(
-            **_prompt_kwargs(
-                book_context,
-                target_language,
-                campaign_complexity,
-                guidelines,
-                system_preset,
-                party_level,
-                tone,
-                theme,
-                character_sheets,
-                "outline",
-            )
-        )
-        outline = _call_llm(model_name, outline_prompt)
-        expand_prompt = build_campaign_prompt(
-            **_prompt_kwargs(
-                book_context,
-                target_language,
-                campaign_complexity,
-                guidelines,
-                system_preset,
-                party_level,
-                tone,
-                theme,
-                character_sheets,
-                "expand",
-                outline=outline,
-            )
-        )
-        content = _call_llm(model_name, expand_prompt)
-    else:
-        if job_id:
-            _update_progress(job_id, "generate")
-        prompt = build_campaign_prompt(
-            **_prompt_kwargs(
-                book_context,
-                target_language,
-                campaign_complexity,
-                guidelines,
-                system_preset,
-                party_level,
-                tone,
-                theme,
-                character_sheets,
-                "full",
-            )
-        )
-        content = _call_llm(model_name, prompt)
+    )
+    content, pipe_meta = generate_campaign_markdown(
+        book_context=book_context,
+        key_terms=key_terms,
+        target_language=target_language,
+        complexity=campaign_complexity,
+        guidelines=guidelines,
+        system_preset=system_preset,
+        party_level=party_level,
+        tone=tone,
+        theme=theme,
+        character_sheets=character_sheets,
+        llm_fn=_llm,
+        retrieve_fn=_retrieve,
+        fallback_full_prompt=fallback_prompt,
+    )
+    meta.update(pipe_meta)
+    if job_id:
+        _update_progress(job_id, "generate")
 
     if job_id:
         _update_progress(job_id, "validate_out")
@@ -528,6 +506,19 @@ def process_campaign_generation(
             mark_failed(job_id, "Could not retrieve usable context from the rulebook.")
             cleanup_temp_files(local_file_path)
             return None
+        if not system_preset or system_preset == "generic":
+            from services.system_detect import detect_system_heuristic
+
+            guessed = detect_system_heuristic(packed["book_context"])
+            if guessed:
+                system_preset = guessed
+                packed = pack_campaign_context(
+                    indexed["book_id"],
+                    theme=theme,
+                    hook=theme,
+                    system_preset=system_preset,
+                    complexity=campaign_complexity,
+                )
         book_bible = {
             "key_terms": packed["key_terms"],
             "setting": packed.get("setting") or "",

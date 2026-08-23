@@ -30,6 +30,9 @@ job_status/
 # RAG indexes (local FAISS + chunks)
 data/indexes/
 
+# Generated live campaigns and score dumps (keep on disk, never commit)
+examples/eval_runs/
+
 # Logs
 *.log
 logs/
