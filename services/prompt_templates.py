@@ -1,6 +1,6 @@
 """Campaign generation prompt templates by RPG system."""
 
-from services.campaign_quality import quality_requirements
+from services.campaign_quality import quality_requirements, word_count
 
 SYSTEM_SECTIONS = {
     "generic": """
@@ -78,7 +78,7 @@ def build_campaign_prompt(
     )
     sections = _mandatory_sections(character_sheets)
     sheets_block = f"\n\n{character_sheets}\n" if character_sheets else ""
-    requirements = quality_requirements(complexity)
+    requirements = quality_requirements(complexity, target_language)
 
     if pass_type == "outline":
         outline_note = ""
@@ -162,9 +162,12 @@ def build_expand_retry_prompt(
             + ", ".join(key_terms[:10])
             + "\n"
         )
-    requirements = quality_requirements(complexity)
+    requirements = quality_requirements(complexity, target_language)
+    draft_words = word_count(content)
     return f"""Rewrite the COMPLETE play-ready RPG campaign in {target_language}.
 Do not return a summary, a patch, or a list of changes. Output the full markdown campaign.
+The draft below is {draft_words} words. Your rewrite MUST be at least {draft_words} words.
+Never replace a long campaign with a short outline.
 
 Fix these issues:
 {issue_list}
@@ -174,5 +177,5 @@ Fix these issues:
 Keep useful content from the draft below and expand it until every requirement is met.
 
 DRAFT:
-{content[:25000]}
+{content[:80000]}
 """

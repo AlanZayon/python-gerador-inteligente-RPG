@@ -2,16 +2,30 @@
 
 import re
 
+from services.campaign_i18n import (
+    NPC_RE,
+    OVERVIEW_RE,
+    count_sessions as i18n_count_sessions,
+    markdown_schema,
+    section_label,
+)
+
 MIN_WORDS = {
     "simples": 800,
     "mediana": 2000,
     "complexa": 4000,
 }
 
+_COMPLEXITY_ALIASES = {
+    "simple": "simples",
+    "medium": "mediana",
+    "complex": "complexa",
+    "complexo": "complexa",
+}
+
 REQUIRED_SECTIONS = [
-    r"overview|visão geral|visao geral|resumo",
-    r"session|sessão|sessao",
-    r"npc",
+    (OVERVIEW_RE, "overview"),
+    (NPC_RE, "npc"),
 ]
 
 SESSION_COUNTS = {
@@ -21,41 +35,37 @@ SESSION_COUNTS = {
 }
 
 
+def canonical_complexity(complexity: str) -> str:
+    key = (complexity or "mediana").lower().strip()
+    return _COMPLEXITY_ALIASES.get(key, key)
+
+
 def word_count(text: str) -> int:
-    return len(re.findall(r"\w+", text))
+    tokens = re.findall(r"\w+", text or "", flags=re.UNICODE)
+    cjk = re.findall(r"[\u3040-\u30ff\u3400-\u9fff\uac00-\ud7af]", text or "")
+    if len(cjk) >= 80:
+        return max(len(tokens), len(cjk) // 2)
+    return len(tokens)
 
 
 def count_sessions(text: str) -> int:
-    nums = [
-        int(m)
-        for m in re.findall(
-            r"(?:session|sessão|sessao)\s*#?\s*(\d+)",
-            text,
-            re.IGNORECASE,
-        )
-    ]
-    if nums:
-        return max(nums)
-    return len(
-        re.findall(
-            r"^#+\s*(?:session|sessão|sessao)\b",
-            text,
-            re.IGNORECASE | re.MULTILINE,
-        )
-    )
+    return i18n_count_sessions(text)
 
 
-def quality_requirements(complexity: str) -> str:
-    min_w = MIN_WORDS.get(complexity, 2000)
-    lo, _hi = SESSION_COUNTS.get(complexity, (3, 5))
+def quality_requirements(complexity: str, language: str = "en") -> str:
+    min_w = MIN_WORDS.get(canonical_complexity(complexity), 2000)
+    lo, _hi = SESSION_COUNTS.get(canonical_complexity(complexity), (3, 5))
+    overview = section_label("overview", language)
+    session = section_label("session", language)
+    npcs = section_label("npcs", language)
     return (
         f"HARD REQUIREMENTS (rejected if missing):\n"
         f"- Write at least {min_w} words. Do not summarize. Write full playable detail.\n"
-        f"- Include markdown heading `## Overview` (or `## Visão Geral` in Portuguese).\n"
-        f"- Include at least {lo} sessions as headings: `## Session 1` ... `## Session {lo}` "
-        f"(or `## Sessão 1` ...).\n"
-        f"- Include a heading containing NPC (e.g. `## Important NPCs`).\n"
-        f"- Each session needs objectives, encounters, NPCs, and treasures in multiple paragraphs."
+        f"- Include markdown heading `## {overview}`.\n"
+        f"- Include at least {lo} sessions as headings: `## {session} 1` ... `## {session} {lo}`.\n"
+        f"- Include a heading for NPCs: `## {npcs}`.\n"
+        f"- Each session needs objectives, encounters, NPCs, and treasures in multiple paragraphs.\n"
+        f"\n{markdown_schema(language)}"
     )
 
 
@@ -68,14 +78,15 @@ def validate_campaign(
     """Return (passed, issues, quality_score 0-100)."""
     issues: list[str] = []
     wc = word_count(content)
+    complexity = canonical_complexity(complexity)
     min_w = MIN_WORDS.get(complexity, 2000)
     if wc < min_w:
         issues.append(f"Word count {wc} below minimum {min_w}")
 
     lower = content.lower()
-    for pattern in REQUIRED_SECTIONS:
-        if not re.search(pattern, lower):
-            issues.append(f"Missing section matching /{pattern}/")
+    for pattern, name in REQUIRED_SECTIONS:
+        if not pattern.search(content or ""):
+            issues.append(f"Missing {name} section")
 
     sessions = count_sessions(content)
     lo, hi = SESSION_COUNTS.get(complexity, (2, 6))
@@ -108,3 +119,43 @@ def validate_campaign(
     score = max(0, min(100, score))
 
     return len(issues) == 0, issues, score
+
+
+def heal_missing_sections(content: str, issues: list[str], language: str = "en") -> str:
+    """Insert canonical headings when the draft is complete but mislabeled."""
+    healed = content or ""
+    blob = " ".join(issues).lower()
+
+    if "npc" in blob and not NPC_RE.search(healed):
+        healed = healed.rstrip() + f"\n\n## {section_label('npcs', language)}\n"
+
+    if "overview" in blob and not OVERVIEW_RE.search(healed):
+        heading = f"## {section_label('overview', language)}"
+        if re.search(r"^# .+$", healed, re.MULTILINE):
+            healed = re.sub(
+                r"^(# .+)$",
+                rf"\1\n\n{heading}\n",
+                healed,
+                count=1,
+                flags=re.MULTILINE,
+            )
+        else:
+            healed = f"{heading}\n\n{healed}"
+
+    if "session" in blob and count_sessions(healed) < 1:
+        healed = (
+            healed.rstrip() + f"\n\n## {section_label('session', language)} 1\n"
+        )
+
+    return healed
+
+
+def is_collapsed_draft(previous: str, candidate: str) -> bool:
+    """True when a retry threw away a long playable draft."""
+    prev_w = word_count(previous)
+    new_w = word_count(candidate)
+    return prev_w >= 600 and new_w < max(400, int(prev_w * 0.5))
+
+
+def draft_rank(content: str, issues: list[str], score: int) -> tuple[int, int, int]:
+    return (-len(issues), word_count(content), score)

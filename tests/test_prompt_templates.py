@@ -46,6 +46,7 @@ def test_prompt_uses_book_context_and_grounding_instruction():
     assert "2000" in prompt
     assert "## Overview" in prompt
     assert "## Session 3" in prompt
+    assert "REQUIRED MARKDOWN SCHEMA" in prompt
 
 
 def test_retry_prompt_demands_full_campaign_rewrite():
@@ -61,3 +62,4 @@ def test_retry_prompt_demands_full_campaign_rewrite():
     assert "2000" in prompt
     assert "Valdris" in prompt
     assert "HARD REQUIREMENTS" in prompt
+    assert "words" in prompt.lower()

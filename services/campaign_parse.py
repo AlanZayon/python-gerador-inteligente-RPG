@@ -3,30 +3,21 @@
 import re
 from typing import Any
 
-SESSION_HEADING = re.compile(
-    r"^(?:session|sessão|sessao)\s*#?\s*(\d+)",
-    re.IGNORECASE,
+from services.campaign_i18n import (
+    ENEMIES_RE,
+    ENDINGS_RE,
+    HOOK_RE,
+    INSPIRED_RE,
+    MAPS_RE,
+    NPC_RE,
+    OVERVIEW_RE,
+    PUZZLES_RE,
+    REWARDS_RE,
+    SESSION_NUMBER_RE,
+    count_sessions as i18n_count_sessions,
 )
-OVERVIEW_HEADING = re.compile(
-    r"overview|visão geral|visao geral|sinopse",
-    re.IGNORECASE,
-)
-HOOK_HEADING = re.compile(
-    r"starting hook|gancho|hook inicial|opening hook",
-    re.IGNORECASE,
-)
-NPC_HEADING = re.compile(
-    r"important npcs?|npcs?|personagens|pnjs?",
-    re.IGNORECASE,
-)
-REWARDS_HEADING = re.compile(
-    r"rewards?|recompensas?|treasure|tesouro",
-    re.IGNORECASE,
-)
-INSPIRED_HEADING = re.compile(
-    r"inspired by|inspirado",
-    re.IGNORECASE,
-)
+from services.campaign_normalize import extract_campaign_title
+
 NPC_LINE = re.compile(r"^[-*]\s+\*\*(.+?)\*\*[:\s—–-]+(.+)$", re.MULTILINE)
 OBJECTIVES = re.compile(
     r"\*\*(?:objectives?|objetivos?)[:\s]*\*\*[:\s]*(.+?)(?=\n\*\*|\n##|\Z)",
@@ -51,14 +42,7 @@ def word_count(text: str) -> int:
 
 
 def count_sessions(text: str) -> int:
-    matches = re.findall(
-        r"(?:session|sessão|sessao)\s*#?\s*(\d+)",
-        text,
-        re.IGNORECASE,
-    )
-    if matches:
-        return max(int(m) for m in matches)
-    return len(re.findall(r"##\s*(?:Session|Sessão|Sessao)\s*\d", text, re.IGNORECASE))
+    return i18n_count_sessions(text)
 
 
 def slugify_title(title: str, max_len: int = 60) -> str:
@@ -68,22 +52,39 @@ def slugify_title(title: str, max_len: int = 60) -> str:
 
 
 def extract_title(content: str) -> str:
-    match = re.search(r"^#\s+(.+)$", content, re.MULTILINE)
-    return match.group(1).strip() if match else "Campaign"
+    return extract_campaign_title(content)
+
+
+def _session_number(heading: str, fallback: int) -> int:
+    match = SESSION_NUMBER_RE.search(heading)
+    if not match:
+        return fallback
+    for group in match.groups():
+        if group:
+            return int(group)
+    return fallback
 
 
 def _classify_heading(heading: str) -> str:
-    if SESSION_HEADING.search(heading):
+    if SESSION_NUMBER_RE.search(heading):
         return "session"
-    if OVERVIEW_HEADING.search(heading):
+    if OVERVIEW_RE.search(heading):
         return "overview"
-    if HOOK_HEADING.search(heading):
+    if HOOK_RE.search(heading):
         return "hook"
-    if NPC_HEADING.search(heading):
+    if NPC_RE.search(heading):
         return "npcs"
-    if REWARDS_HEADING.search(heading):
+    if ENEMIES_RE.search(heading):
+        return "enemies"
+    if PUZZLES_RE.search(heading):
+        return "puzzles"
+    if ENDINGS_RE.search(heading):
+        return "endings"
+    if MAPS_RE.search(heading):
+        return "maps"
+    if REWARDS_RE.search(heading):
         return "rewards"
-    if INSPIRED_HEADING.search(heading):
+    if INSPIRED_RE.search(heading):
         return "inspired"
     return "generic"
 
@@ -150,8 +151,9 @@ def parse_campaign(content: str) -> dict[str, Any]:
             "id": f"sec-{len(sections)}",
         }
         if section_type == "session":
-            num_match = SESSION_HEADING.search(heading)
-            section["number"] = int(num_match.group(1)) if num_match else len(sections) + 1
+            section["number"] = _session_number(
+                heading, len([s for s in sections if s.get("type") == "session"]) + 1
+            )
             section.update(_parse_session_body(body))
         elif section_type == "npcs":
             section["npcs"] = _parse_npcs(body)

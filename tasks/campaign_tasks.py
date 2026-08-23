@@ -5,6 +5,7 @@ Campaign generation pipeline — multi-pass, book-aware, quality-validated.
 import json
 import logging
 import os
+import re
 import tempfile
 import time
 from datetime import datetime
@@ -17,8 +18,14 @@ from werkzeug.utils import secure_filename
 
 load_dotenv()
 
-from services.book_analysis import format_inspired_block
-from services.campaign_quality import validate_campaign
+from services.campaign_normalize import normalize_campaign_markdown
+from services.campaign_quality import (
+    draft_rank,
+    heal_missing_sections,
+    is_collapsed_draft,
+    validate_campaign,
+    word_count,
+)
 from services.job_status import mark_failed, mark_processing, save_result, save_status
 from services.llm_client import (
     complete,
@@ -153,27 +160,14 @@ def get_complexity_guidelines(complexity):
 
 
 def format_campaign_output(content, complexity, language, title=None, inspired_block=""):
-    complexity_map = {"simples": "simple", "mediana": "medium", "complexa": "complex"}
-    english = complexity_map.get(complexity.lower(), complexity.lower())
-    session_counts = {"simple": "1-2", "medium": "3-4", "complex": "5+"}
-    display = {"simple": "Simple", "medium": "Medium", "complex": "Complex"}.get(
-        english, english.capitalize()
+    del complexity, inspired_block  # kept for call-site compatibility
+    body = normalize_campaign_markdown(content, language=language)
+    if title:
+        body = re.sub(r"^# .+$", f"# {title.strip()}", body, count=1, flags=re.MULTILINE)
+    return (
+        body.rstrip()
+        + "\n\n---\n\n*Generated from your uploaded rulebook. Review balance for your table.*\n"
     )
-    title_line = f"# {title}" if title else ""
-    return f"""# RPG Campaign — {display.upper()}
-{title_line}
-**Duration**: {session_counts.get(english, "3-4")} sessions
-**Language**: {language}
-**Generated**: {datetime.now().strftime("%m/%d/%Y %H:%M")}
-{inspired_block}
----
-
-{content}
-
----
-
-*Generated from your uploaded rulebook. Review balance for your table.*
-"""
 
 
 def generate_fallback_campaign(complexity, language):
@@ -382,38 +376,77 @@ def _generate_campaign_content(
         character_names=character_names,
         key_terms=key_terms,
     )
+    if not passed:
+        healed = heal_missing_sections(content, issues, target_language)
+        if healed != content:
+            content = healed
+            passed, issues, score = validate_campaign(
+                content,
+                campaign_complexity,
+                character_names=character_names,
+                key_terms=key_terms,
+            )
     meta["quality_score"] = score
+    best_content = content
+    best_issues = issues
+    best_score = score
+    best_passed = passed
     quality_retries = 2
     attempt = 0
-    while not passed and attempt < quality_retries:
+    while not best_passed and attempt < quality_retries:
         attempt += 1
-        logger.info("Quality retry %s for job: %s", attempt, issues)
+        logger.info("Quality retry %s for job: %s", attempt, best_issues)
         retry_prompt = build_expand_retry_prompt(
-            content,
-            issues,
+            best_content,
+            best_issues,
             target_language,
             key_terms=key_terms,
             complexity=campaign_complexity,
         )
-        content = _call_llm(model_name, retry_prompt)
-        passed, issues, score = validate_campaign(
-            content,
+        candidate = _call_llm(model_name, retry_prompt)
+        if is_collapsed_draft(best_content, candidate):
+            logger.warning(
+                "Ignoring collapsed quality retry (%s words -> %s words)",
+                word_count(best_content),
+                word_count(candidate),
+            )
+            continue
+        cand_passed, cand_issues, cand_score = validate_campaign(
+            candidate,
             campaign_complexity,
             character_names=character_names,
             key_terms=key_terms,
         )
-        meta["quality_score"] = score
+        if not cand_passed:
+            healed = heal_missing_sections(candidate, cand_issues, target_language)
+            if healed != candidate:
+                candidate = healed
+                cand_passed, cand_issues, cand_score = validate_campaign(
+                    candidate,
+                    campaign_complexity,
+                    character_names=character_names,
+                    key_terms=key_terms,
+                )
+        if draft_rank(candidate, cand_issues, cand_score) > draft_rank(
+            best_content, best_issues, best_score
+        ):
+            best_content = candidate
+            best_issues = cand_issues
+            best_score = cand_score
+            best_passed = cand_passed
+    content = best_content
+    issues = best_issues
+    score = best_score
+    passed = best_passed
+    meta["quality_score"] = score
     if not passed:
         raise GenerationFailedError(
             f"Campaign quality below threshold: {'; '.join(issues)}"
         )
 
-    inspired = format_inspired_block(book_bible)
     meta["word_count"] = len(content.split())
     meta["session_count"] = content.lower().count("session") + content.lower().count("sessão")
-    formatted = format_campaign_output(
-        content, campaign_complexity, target_language, inspired_block=inspired
-    )
+    formatted = format_campaign_output(content, campaign_complexity, target_language)
     return formatted, meta
 
 

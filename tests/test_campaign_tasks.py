@@ -5,7 +5,6 @@ from tasks.campaign_tasks import generate_fallback_campaign
 def test_generate_fallback_campaign_simples():
     content = generate_fallback_campaign("simples", "en")
     assert "Whispering" in content or "Cellar" in content
-    assert "Simple" in content or "SIMPLE" in content
 
 
 def test_generate_fallback_campaign_complexa():
