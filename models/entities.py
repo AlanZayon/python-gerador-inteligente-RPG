@@ -79,6 +79,19 @@ class CreditTransaction(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 
+class BookIndex(Base):
+    __tablename__ = "book_indexes"
+
+    book_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    sha256: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    page_count: Mapped[int] = mapped_column(Integer, default=0)
+    fingerprints_json: Mapped[str] = mapped_column(Text, default="[]")
+    text_sha256: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    chunk_count: Mapped[int] = mapped_column(Integer, default=0)
+    embed_model: Mapped[str] = mapped_column(String(128), default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
 class StripeEvent(Base):
     __tablename__ = "stripe_events"
 

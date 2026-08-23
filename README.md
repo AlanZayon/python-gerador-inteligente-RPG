@@ -1,11 +1,11 @@
 # RPG Campaign Generator API
 
-Flask API that transforms RPG rulebook PDFs into ready-to-play campaigns using Google Gemini (with template fallback). Processing is asynchronous via Redis queue and a dedicated worker process.
+Flask API that transforms RPG rulebook PDFs into ready-to-play campaigns using a local 9router gateway (OpenAI-compatible, with template fallback). Processing is asynchronous via Redis queue and a dedicated worker process.
 
 ## Architecture
 
 ```
-Frontend (Vue) → Flask API → Redis queue → worker.py → S3 + Gemini
+Frontend (Vue) → Flask API → Redis queue → worker.py → S3 + 9router
                      ↓
               PostgreSQL (users, jobs, billing)
 ```
@@ -20,7 +20,7 @@ Frontend (Vue) → Flask API → Redis queue → worker.py → S3 + Gemini
 python -m venv venv
 venv\Scripts\activate          # Windows
 pip install -r requirements.txt
-cp .env.example .env           # fill in AWS, Redis, optional Gemini
+cp .env.example .env           # fill in AWS, Redis, 9router
 
 python app.py                  # terminal 1 — API on :5000
 python worker.py               # terminal 2 — job consumer
@@ -86,7 +86,7 @@ Copy `.env.example` and configure:
 - **AWS_***, **S3_BUCKET_NAME** — required for uploads
 - **REDIS_URL** — required for async mode
 - **CLERK_JWKS_URL**, **CLERK_ISSUER** — required in production
-- **GEMINI_API_KEY** — optional (fallback generator without it)
+- **NINEROUTER_URL**, **NINEROUTER_KEY** — local 9router gateway (replaces Gemini)
 - **STRIPE_*** — billing (checkout, webhook, price IDs)
 - **SENTRY_DSN** — optional error tracking
 

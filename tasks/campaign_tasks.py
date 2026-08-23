@@ -11,16 +11,21 @@ from datetime import datetime
 from urllib.parse import urlparse
 
 import fitz
-import google.generativeai as genai
 import requests
 from dotenv import load_dotenv
 from werkzeug.utils import secure_filename
 
 load_dotenv()
 
-from services.book_analysis import build_book_bible, format_inspired_block
+from services.book_analysis import format_inspired_block
 from services.campaign_quality import validate_campaign
 from services.job_status import mark_failed, mark_processing, save_result, save_status
+from services.llm_client import (
+    complete,
+    is_configured,
+    model_flash,
+    model_for_complexity,
+)
 from services.prompt_templates import build_campaign_prompt, build_expand_retry_prompt
 from services.s3_storage import upload_content_to_s3, generate_presigned_url
 from services.sheet_extraction import (
@@ -30,7 +35,6 @@ from services.sheet_extraction import (
     extract_character_names,
 )
 from services.sheet_validation import validate_sheets_json_size
-from services.jobs_db import update_job_character_sheets
 
 logging.basicConfig(
     level=logging.INFO,
@@ -39,27 +43,15 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 CAMPAIGN_FOLDER = "campaigns/"
-GEMINI_MAX_INPUT_CHARS = int(os.getenv("GEMINI_MAX_INPUT_CHARS", "15000"))
-GEMINI_RETRY_ATTEMPTS = int(os.getenv("GEMINI_RETRY_ATTEMPTS", "3"))
-GEMINI_MODEL_LITE = os.getenv("GEMINI_MODEL_LITE", "gemini-2.5-flash-lite")
-GEMINI_MODEL_FLASH = os.getenv("GEMINI_MODEL_FLASH", "gemini-2.5-flash")
-GEMINI_MODEL_PRO = os.getenv("GEMINI_MODEL_PRO", "gemini-2.5-flash")
-
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
-GEMINI_CONFIGURED = bool(
-    GEMINI_API_KEY and GEMINI_API_KEY != "sua_chave_aqui" and len(GEMINI_API_KEY) > 10
-)
-
-if GEMINI_CONFIGURED:
-    genai.configure(api_key=GEMINI_API_KEY)
 
 PROGRESS_STAGES = {
     "download": (5, "Downloading your rulebook..."),
     "validate": (10, "Validating PDF pages..."),
-    "extract": (15, "Extracting text from PDF..."),
-    "sheets": (20, "Reading character sheets..."),
-    "analyze": (30, "Analyzing your book..."),
-    "outline": (50, "Building campaign outline..."),
+    "fingerprint": (18, "Fingerprinting your rulebook..."),
+    "extract": (22, "Extracting text from PDF..."),
+    "sheets": (28, "Reading character sheets..."),
+    "analyze": (40, "Indexing and retrieving from your book..."),
+    "outline": (55, "Building campaign outline..."),
     "generate": (75, "Weaving your campaign..."),
     "validate_out": (90, "Validating campaign quality..."),
     "upload": (100, "Saving your campaign..."),
@@ -70,8 +62,13 @@ class GenerationFailedError(Exception):
     pass
 
 
+def is_llm_configured() -> bool:
+    return is_configured()
+
+
 def is_gemini_configured() -> bool:
-    return GEMINI_CONFIGURED
+    """Backward-compatible alias for is_llm_configured."""
+    return is_configured()
 
 
 def _update_progress(job_id: str, stage: str) -> None:
@@ -79,41 +76,17 @@ def _update_progress(job_id: str, stage: str) -> None:
     mark_processing(job_id, message, progress_percent=percent)
 
 
-def _model_for_complexity(complexity: str) -> str:
-    mapping = {
-        "simples": GEMINI_MODEL_LITE,
-        "mediana": GEMINI_MODEL_FLASH,
-        "complexa": GEMINI_MODEL_PRO,
-    }
-    return mapping.get(complexity, GEMINI_MODEL_FLASH)
-
-
 def _model_tier(model_name: str) -> str:
-    if "lite" in model_name:
-        return "flash-lite"
-    if "pro" in model_name:
+    name = (model_name or "").lower()
+    if any(token in name for token in ("lite", "haiku", "nano", "flash-lite")):
+        return "lite"
+    if any(token in name for token in ("pro", "opus", "sonnet")):
         return "pro"
     return "flash"
 
 
-def _call_gemini(model_name: str, prompt: str) -> str:
-    model = genai.GenerativeModel(model_name)
-    last_error = None
-    for attempt in range(1, GEMINI_RETRY_ATTEMPTS + 1):
-        try:
-            response = model.generate_content(prompt)
-            if not response.candidates:
-                raise ValueError("Empty response from Gemini")
-            text = response.text
-            if not text or not text.strip():
-                raise ValueError("Empty text from Gemini")
-            return text
-        except Exception as exc:
-            last_error = exc
-            wait = 2**attempt
-            logger.warning("Gemini attempt %s failed: %s. Retrying in %ss...", attempt, exc, wait)
-            time.sleep(wait)
-    raise last_error
+def _call_llm(model_name: str, prompt: str) -> str:
+    return complete(prompt, model=model_name)
 
 
 def download_file_from_s3(file_url, job_id):
@@ -204,7 +177,7 @@ def format_campaign_output(content, complexity, language, title=None, inspired_b
 
 
 def generate_fallback_campaign(complexity, language):
-    """Offline template — only when Gemini is not configured."""
+    """Offline template — only when 9router is not configured."""
     from deep_translator import GoogleTranslator
 
     base = {
@@ -248,15 +221,45 @@ def _process_character_sheets(
         return [], "", []
 
     sheets_json = json.dumps(sheets, ensure_ascii=False)
+    from services.jobs_db import update_job_character_sheets
+
     update_job_character_sheets(job_id, sheets_json)
     sheets_block = format_sheets_for_prompt(sheets)
     names = extract_character_names(sheets)
     return sheets, sheets_block, names
 
 
+def _prompt_kwargs(
+    book_context: str,
+    target_language: str,
+    campaign_complexity: str,
+    guidelines: str,
+    system_preset: str | None,
+    party_level: str,
+    tone: str,
+    theme: str,
+    character_sheets: str,
+    pass_type: str,
+    outline: str = "",
+) -> dict:
+    return {
+        "book_context": book_context,
+        "target_language": target_language,
+        "complexity": campaign_complexity,
+        "guidelines": guidelines,
+        "system_preset": system_preset,
+        "party_level": party_level,
+        "tone": tone,
+        "theme": theme,
+        "pass_type": pass_type,
+        "outline": outline,
+        "character_sheets": character_sheets,
+    }
+
+
 def _generate_campaign_content(
     book_bible: dict,
-    book_text: str,
+    book_context: str,
     target_language: str,
     campaign_complexity: str,
     system_preset: str | None,
@@ -268,15 +271,16 @@ def _generate_campaign_content(
     character_names: list[str] | None = None,
 ) -> tuple[str, dict]:
     """Multi-pass generation. Returns (markdown, metadata)."""
-    if not GEMINI_CONFIGURED:
+    if not is_configured():
         raise GenerationFailedError("AI generation unavailable — credits will be refunded")
 
-    model_name = _model_for_complexity(campaign_complexity)
+    model_name = model_for_complexity(campaign_complexity)
     guidelines = get_complexity_guidelines(campaign_complexity)
+    key_terms = book_bible.get("key_terms") or []
     meta = {
-        "generation_source": "gemini",
+        "generation_source": "9router",
         "model_tier": _model_tier(model_name),
-        "book_signals": book_bible.get("key_terms", [])[:5],
+        "book_signals": key_terms[:5],
     }
 
     if job_id:
@@ -284,94 +288,112 @@ def _generate_campaign_content(
 
     if campaign_complexity == "complexa":
         outline_prompt = build_campaign_prompt(
-            book_bible=book_bible,
-            target_language=target_language,
-            complexity=campaign_complexity,
-            guidelines=guidelines,
-            system_preset=system_preset,
-            party_level=party_level,
-            tone=tone,
-            theme=theme,
-            pass_type="outline",
-            character_sheets=character_sheets,
+            **_prompt_kwargs(
+                book_context,
+                target_language,
+                campaign_complexity,
+                guidelines,
+                system_preset,
+                party_level,
+                tone,
+                theme,
+                character_sheets,
+                "outline",
+            )
         )
-        outline = _call_gemini(model_name, outline_prompt)
+        outline = _call_llm(model_name, outline_prompt)
         if job_id:
             _update_progress(job_id, "generate")
         expand_prompt = build_campaign_prompt(
-            book_bible=book_bible,
-            target_language=target_language,
-            complexity=campaign_complexity,
-            guidelines=guidelines,
-            system_preset=system_preset,
-            party_level=party_level,
-            tone=tone,
-            theme=theme,
-            pass_type="expand",
-            outline=outline,
-            character_sheets=character_sheets,
+            **_prompt_kwargs(
+                book_context,
+                target_language,
+                campaign_complexity,
+                guidelines,
+                system_preset,
+                party_level,
+                tone,
+                theme,
+                character_sheets,
+                "expand",
+                outline=outline,
+            )
         )
-        content = _call_gemini(model_name, expand_prompt)
+        content = _call_llm(model_name, expand_prompt)
     elif campaign_complexity == "mediana":
         if job_id:
             _update_progress(job_id, "generate")
         outline_prompt = build_campaign_prompt(
-            book_bible=book_bible,
-            target_language=target_language,
-            complexity=campaign_complexity,
-            guidelines=guidelines,
-            system_preset=system_preset,
-            party_level=party_level,
-            tone=tone,
-            theme=theme,
-            pass_type="outline",
-            character_sheets=character_sheets,
+            **_prompt_kwargs(
+                book_context,
+                target_language,
+                campaign_complexity,
+                guidelines,
+                system_preset,
+                party_level,
+                tone,
+                theme,
+                character_sheets,
+                "outline",
+            )
         )
-        outline = _call_gemini(model_name, outline_prompt)
+        outline = _call_llm(model_name, outline_prompt)
         expand_prompt = build_campaign_prompt(
-            book_bible=book_bible,
-            target_language=target_language,
-            complexity=campaign_complexity,
-            guidelines=guidelines,
-            system_preset=system_preset,
-            party_level=party_level,
-            tone=tone,
-            theme=theme,
-            pass_type="expand",
-            outline=outline,
-            character_sheets=character_sheets,
+            **_prompt_kwargs(
+                book_context,
+                target_language,
+                campaign_complexity,
+                guidelines,
+                system_preset,
+                party_level,
+                tone,
+                theme,
+                character_sheets,
+                "expand",
+                outline=outline,
+            )
         )
-        content = _call_gemini(model_name, expand_prompt)
+        content = _call_llm(model_name, expand_prompt)
     else:
         if job_id:
             _update_progress(job_id, "generate")
         prompt = build_campaign_prompt(
-            book_bible=book_bible,
-            target_language=target_language,
-            complexity=campaign_complexity,
-            guidelines=guidelines,
-            system_preset=system_preset,
-            party_level=party_level,
-            tone=tone,
-            theme=theme,
-            pass_type="full",
-            character_sheets=character_sheets,
+            **_prompt_kwargs(
+                book_context,
+                target_language,
+                campaign_complexity,
+                guidelines,
+                system_preset,
+                party_level,
+                tone,
+                theme,
+                character_sheets,
+                "full",
+            )
         )
-        content = _call_gemini(model_name, prompt)
+        content = _call_llm(model_name, prompt)
 
     if job_id:
         _update_progress(job_id, "validate_out")
 
     passed, issues, score = validate_campaign(
-        content, campaign_complexity, character_names=character_names
+        content,
+        campaign_complexity,
+        character_names=character_names,
+        key_terms=key_terms,
     )
     meta["quality_score"] = score
     if not passed:
         logger.info("Quality retry for job: %s", issues)
-        retry_prompt = build_expand_retry_prompt(content, issues, target_language)
-        content = _call_gemini(model_name, retry_prompt)
+        retry_prompt = build_expand_retry_prompt(
+            content, issues, target_language, key_terms=key_terms
+        )
+        content = _call_llm(model_name, retry_prompt)
         passed, issues, score = validate_campaign(
-            content, campaign_complexity, character_names=character_names
+            content,
+            campaign_complexity,
+            character_names=character_names,
+            key_terms=key_terms,
         )
         meta["quality_score"] = score
         if not passed:
@@ -430,14 +452,17 @@ def process_campaign_generation(
             return None
 
         t0 = time.time()
-        _update_progress(job_id, "extract")
-        book_text = extract_text_from_pdf(local_file_path)
-        timings["extract_ms"] = int((time.time() - t0) * 1000)
+        _update_progress(job_id, "fingerprint")
+        from services.rag.indexer import ensure_indexed
+        from services.rag.context_packer import pack_campaign_context
 
-        if not book_text or len(book_text.strip()) < 100:
-            mark_failed(job_id, "Insufficient text extracted from PDF.")
+        try:
+            indexed = ensure_indexed(local_file_path, source_filename=filename)
+        except ValueError as exc:
+            mark_failed(job_id, str(exc))
             cleanup_temp_files(local_file_path)
             return None
+        timings["fingerprint_ms"] = int((time.time() - t0) * 1000)
 
         if use_character_sheets and sheet_s3_keys:
             t0 = time.time()
@@ -452,13 +477,27 @@ def process_campaign_generation(
 
         t0 = time.time()
         _update_progress(job_id, "analyze")
-        # TODO: USE_RAG=true → skip build_book_bible, index PDF once, use services.rag.generator
-        bible_model = GEMINI_MODEL_LITE if GEMINI_CONFIGURED else None
-        book_bible = build_book_bible(book_text, model_name=bible_model or GEMINI_MODEL_LITE)
+        packed = pack_campaign_context(
+            indexed["book_id"],
+            theme=theme,
+            hook=theme,
+            system_preset=system_preset,
+            complexity=campaign_complexity,
+        )
+        if packed["chunks_used"] <= 0:
+            mark_failed(job_id, "Could not retrieve usable context from the rulebook.")
+            cleanup_temp_files(local_file_path)
+            return None
+        book_bible = {
+            "key_terms": packed["key_terms"],
+            "setting": packed.get("setting") or "",
+            "book_id": indexed["book_id"],
+            "book_context": packed["book_context"][:12000],
+        }
         timings["analyze_ms"] = int((time.time() - t0) * 1000)
 
         t0 = time.time()
-        if not GEMINI_CONFIGURED:
+        if not is_configured():
             mark_failed(
                 job_id,
                 "AI generation unavailable. Your credits have been refunded.",
@@ -468,7 +507,7 @@ def process_campaign_generation(
 
         campaign_content, gen_meta = _generate_campaign_content(
             book_bible=book_bible,
-            book_text=book_text,
+            book_context=packed["book_context"],
             target_language=target_language,
             campaign_complexity=campaign_complexity,
             system_preset=system_preset,
@@ -495,6 +534,9 @@ def process_campaign_generation(
             "file_size": len(campaign_content),
             "timings": timings,
             "book_bible": book_bible,
+            "book_id": indexed["book_id"],
+            "index_reused": bool(indexed.get("index_reused")),
+            "chunks_used": packed["chunks_used"],
             **gen_meta,
         }
         save_status(job_id, "completed", result)
@@ -523,11 +565,16 @@ def regenerate_section(
     system_preset: str | None = None,
 ) -> str:
     """Regenerate a campaign section (1 credit)."""
-    model_name = GEMINI_MODEL_FLASH
+    model_name = model_flash()
+    book_context = ""
+    if isinstance(book_bible, dict):
+        book_context = book_bible.get("book_context") or json.dumps(book_bible)[:8000]
+    else:
+        book_context = str(book_bible)[:8000]
     prompt = f"""You are an RPG campaign designer.
 
-BOOK ANALYSIS:
-{json.dumps(book_bible)[:8000]}
+BOOK CONTEXT:
+{book_context}
 
 CURRENT CAMPAIGN:
 {current_content[:20000]}
@@ -537,5 +584,6 @@ Additional instructions: {instructions}
 
 Output ONLY the new/expanded section in markdown, in {target_language}.
 System: {system_preset or 'generic'}
+Reuse names and terms from the book context.
 """
-    return _call_gemini(model_name, prompt)
+    return _call_llm(model_name, prompt)

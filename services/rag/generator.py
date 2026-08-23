@@ -72,7 +72,7 @@ def generate_campaign(
     return {
         "campaign": campaign,
         "chunks_used": len(chunks),
-        "generation_source": "llama",
+        "generation_source": "9router",
         "book_id": book_id,
         "prompt_token_estimate": None,  # TODO: expose token count if needed
     }

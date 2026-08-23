@@ -11,7 +11,7 @@ import redis
 from datetime import datetime
 
 from database import check_database_connection, init_db
-from tasks.campaign_tasks import is_gemini_configured
+from tasks.campaign_tasks import is_llm_configured
 from examples.campaign_samples import get_sample_campaign
 from services.s3_storage import upload_pdf_to_s3, upload_pdf_with_key, generate_presigned_url, fetch_s3_text, s3_configured
 from services.redis_client import (
@@ -61,7 +61,7 @@ FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:5173")
 
 S3_BUCKET_NAME = os.getenv('S3_BUCKET_NAME')
 AWS_REGION = os.getenv('AWS_REGION', 'us-east-1')
-GEMINI_CONFIGURED = is_gemini_configured()
+LLM_CONFIGURED = is_llm_configured()
 
 CORS_ORIGINS = os.getenv(
     "CORS_ORIGINS",
@@ -534,7 +534,8 @@ def get_status_endpoint():
         'service': 'Arcane Forge',
         'supported_formats': list(ALLOWED_EXTENSIONS),
         'max_file_size_mb': MAX_FILE_SIZE // (1024 * 1024),
-        'gemini_configured': GEMINI_CONFIGURED,
+        'llm_configured': LLM_CONFIGURED,
+        'gemini_configured': LLM_CONFIGURED,
         'redis_connected': redis_conn is not None,
         'queue_status': {
             'pending_jobs': pending_jobs,

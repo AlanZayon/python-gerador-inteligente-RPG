@@ -98,6 +98,22 @@ def build_and_save(book_id: str, chunks: list[dict], meta: dict | None = None) -
     return save_index(book_id, chunks, vectors, meta=meta)
 
 
+def opening_chunks(book_id: str, n: int = 2) -> list[dict]:
+    """Return the first n stored chunks (typically the start of the book)."""
+    _, chunks, _ = load_index(book_id)
+    out = []
+    for chunk in chunks[:n]:
+        out.append(
+            {
+                "chunk_id": chunk["id"],
+                "text": chunk["text"],
+                "score": 0.0,
+                "token_count": chunk.get("token_count"),
+            }
+        )
+    return out
+
+
 def search(
     book_id: str,
     query_vector: np.ndarray,

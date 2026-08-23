@@ -53,8 +53,8 @@ def test_extract_character_names():
     assert extract_character_names(sheets) == ["Aldric", "Mira"]
 
 
-def test_parse_character_sheet_without_gemini(monkeypatch):
-    monkeypatch.setattr("services.sheet_extraction.GEMINI_CONFIGURED", False)
+def test_parse_character_sheet_without_llm(monkeypatch):
+    monkeypatch.setattr("services.sheet_extraction.is_configured", lambda: False)
     result = parse_character_sheet("Name: Thorin\nClass: Cleric", "dnd5e")
     assert result["name"] == "Player Character"
     assert "Thorin" in result["backstory"] or "Thorin" in result["raw_excerpt"]

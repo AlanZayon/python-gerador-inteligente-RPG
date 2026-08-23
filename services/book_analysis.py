@@ -5,16 +5,11 @@ import logging
 import os
 import re
 
-import google.generativeai as genai
+from services.llm_client import complete, is_configured, model_lite
 
 logger = logging.getLogger(__name__)
 
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
-GEMINI_CONFIGURED = bool(GEMINI_API_KEY and GEMINI_API_KEY != "sua_chave_aqui" and len(GEMINI_API_KEY) > 10)
 CHUNK_SIZE = int(os.getenv("BOOK_BIBLE_CHUNK_SIZE", "8000"))
-
-if GEMINI_CONFIGURED:
-    genai.configure(api_key=GEMINI_API_KEY)
 
 
 def split_text_chunks(full_text: str, chunk_size: int = CHUNK_SIZE) -> list[str]:
@@ -41,7 +36,7 @@ def split_text_chunks(full_text: str, chunk_size: int = CHUNK_SIZE) -> list[str]
     return chunks
 
 
-def _summarize_chunk(model, chunk: str, index: int, total: int) -> str:
+def _summarize_chunk(chunk: str, index: int, total: int, model_name: str) -> str:
     prompt = f"""Summarize this RPG book excerpt (part {index + 1}/{total}). Extract:
 - Setting and world tone
 - Game system hints (D&D, Pathfinder, etc.)
@@ -52,14 +47,13 @@ Be concise bullet points. Excerpt:
 {chunk[:12000]}
 """
     try:
-        response = model.generate_content(prompt)
-        return response.text or ""
+        return complete(prompt, model=model_name, temperature=0.3)
     except Exception as exc:
         logger.warning("Chunk summary failed: %s", exc)
         return ""
 
 
-def _merge_summaries(model, summaries: list[str]) -> dict:
+def _merge_summaries(summaries: list[str], model_name: str) -> dict:
     combined = "\n\n---\n\n".join(s for s in summaries if s.strip())
     prompt = f"""Merge these RPG book summaries into one JSON object with keys:
 setting, system, tone, factions, locations, creatures, key_terms (array of 5-10 strings), mechanics_notes
@@ -70,8 +64,7 @@ Summaries:
 {combined[:20000]}
 """
     try:
-        response = model.generate_content(prompt)
-        text = (response.text or "").strip()
+        text = complete(prompt, model=model_name, temperature=0.2).strip()
         text = text.removeprefix("```json").removeprefix("```").removesuffix("```").strip()
         return json.loads(text)
     except Exception as exc:
@@ -88,9 +81,9 @@ Summaries:
         }
 
 
-def build_book_bible(full_text: str, model_name: str = "gemini-2.5-flash-lite") -> dict:
+def build_book_bible(full_text: str, model_name: str | None = None) -> dict:
     """Build structured book bible via map-reduce summarization."""
-    if not GEMINI_CONFIGURED:
+    if not is_configured():
         return {
             "setting": "Generic fantasy setting",
             "system": "generic",
@@ -99,10 +92,10 @@ def build_book_bible(full_text: str, model_name: str = "gemini-2.5-flash-lite") 
             "mechanics_notes": full_text[:3000],
         }
 
-    model = genai.GenerativeModel(model_name)
+    name = model_name or model_lite()
     chunks = split_text_chunks(full_text)
-    summaries = [_summarize_chunk(model, c, i, len(chunks)) for i, c in enumerate(chunks[:12])]
-    bible = _merge_summaries(model, summaries)
+    summaries = [_summarize_chunk(c, i, len(chunks), name) for i, c in enumerate(chunks[:12])]
+    bible = _merge_summaries(summaries, name)
     if not bible.get("key_terms"):
         bible["key_terms"] = _extract_terms_heuristic(full_text)
     return bible

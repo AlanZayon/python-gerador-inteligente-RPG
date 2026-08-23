@@ -1,14 +1,12 @@
 """Tests for FAISS retrieval."""
 
-import json
-from pathlib import Path
 from unittest.mock import patch
 
 import numpy as np
 import pytest
 
 from services.rag.faiss_store import save_index, search
-from services.rag.retrieval import build_query, retrieve
+from services.rag.retrieval import build_query, retrieve, retrieve_coverage
 
 
 @pytest.fixture
@@ -57,3 +55,21 @@ def test_search_returns_top_k(temp_index):
     assert len(results) == 2
     assert results[0]["chunk_id"] == 1
     assert "Political" in results[0]["text"]
+
+
+@patch("services.rag.retrieval.opening_chunks", return_value=[])
+@patch("services.rag.retrieval.embed_texts")
+def test_retrieve_coverage_has_four_lanes(mock_embed, mock_opening, temp_index):
+    mock_embed.return_value = np.array(
+        [
+            [1.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0],
+            [0.0, 0.0, 1.0],
+            [0.9, 0.1, 0.0],
+        ],
+        dtype=np.float32,
+    )
+    lanes = retrieve_coverage("test-book", theme="horror", hook="graveyard", top_k=1)
+    assert set(lanes) == {"setting", "mechanics", "lore", "theme"}
+    assert lanes["setting"]
+    assert lanes["theme"]

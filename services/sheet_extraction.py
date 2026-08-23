@@ -2,22 +2,14 @@
 
 import json
 import logging
-import os
 
 import fitz
-import google.generativeai as genai
+
+from services.llm_client import complete, is_configured, model_lite
 
 logger = logging.getLogger(__name__)
 
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
-GEMINI_CONFIGURED = bool(
-    GEMINI_API_KEY and GEMINI_API_KEY != "sua_chave_aqui" and len(GEMINI_API_KEY) > 10
-)
-GEMINI_MODEL_LITE = os.getenv("GEMINI_MODEL_LITE", "gemini-2.5-flash-lite")
 MAX_PROMPT_CHARS = 8000
-
-if GEMINI_CONFIGURED:
-    genai.configure(api_key=GEMINI_API_KEY)
 
 
 def extract_pdf_text(file_path: str) -> str:
@@ -57,7 +49,7 @@ def parse_character_sheet(text: str, system_preset: str | None = None) -> dict:
             "raw_excerpt": "",
         }
 
-    if not GEMINI_CONFIGURED:
+    if not is_configured():
         return {
             "name": "Player Character",
             "class": "",
@@ -80,14 +72,13 @@ SHEET TEXT:
 {excerpt}
 """
     try:
-        model = genai.GenerativeModel(GEMINI_MODEL_LITE)
-        response = model.generate_content(prompt)
-        parsed = _parse_json_response(response.text or "")
+        text = complete(prompt, model=model_lite(), temperature=0.2)
+        parsed = _parse_json_response(text)
         if parsed.get("name"):
             parsed.setdefault("raw_excerpt", excerpt[:500])
             return parsed
     except Exception as exc:
-        logger.warning("Gemini sheet parse failed: %s", exc)
+        logger.warning("9router sheet parse failed: %s", exc)
 
     return {
         "name": "Player Character",

@@ -14,12 +14,26 @@ RAG_CHUNK_MIN_TOKENS = int(os.getenv("RAG_CHUNK_MIN_TOKENS", "500"))
 RAG_CHUNK_MAX_TOKENS = int(os.getenv("RAG_CHUNK_MAX_TOKENS", "800"))
 RAG_CHUNK_OVERLAP_TOKENS = int(os.getenv("RAG_CHUNK_OVERLAP_TOKENS", "100"))
 
-# How many chunks to inject into the generation prompt
-RAG_TOP_K = int(os.getenv("RAG_TOP_K", "6"))
+# How many chunks to retrieve per coverage query
+RAG_TOP_K = int(os.getenv("RAG_TOP_K", "8"))
 
-# llama.cpp HTTP server (llama-server)
-LLAMA_BASE_URL = os.getenv("LLAMA_BASE_URL", "http://127.0.0.1:8080").rstrip("/")
-LLAMA_MODEL = os.getenv("LLAMA_MODEL", "llama-3-8b")
-LLAMA_N_PREDICT = int(os.getenv("LLAMA_N_PREDICT", "4096"))
-LLAMA_TEMPERATURE = float(os.getenv("LLAMA_TEMPERATURE", "0.7"))
-LLAMA_TIMEOUT = int(os.getenv("LLAMA_TIMEOUT", "600"))
+# Book-context token floors/ceilings by complexity (quality-first, not a diet)
+RAG_CONTEXT_FLOOR_SIMPLES = int(os.getenv("RAG_CONTEXT_FLOOR_SIMPLES", "2500"))
+RAG_CONTEXT_CEILING_SIMPLES = int(os.getenv("RAG_CONTEXT_CEILING_SIMPLES", "4000"))
+RAG_CONTEXT_FLOOR_MEDIANA = int(os.getenv("RAG_CONTEXT_FLOOR_MEDIANA", "4000"))
+RAG_CONTEXT_CEILING_MEDIANA = int(os.getenv("RAG_CONTEXT_CEILING_MEDIANA", "6500"))
+RAG_CONTEXT_FLOOR_COMPLEXA = int(os.getenv("RAG_CONTEXT_FLOOR_COMPLEXA", "5500"))
+RAG_CONTEXT_CEILING_COMPLEXA = int(os.getenv("RAG_CONTEXT_CEILING_COMPLEXA", "9000"))
+
+CONTEXT_BUDGETS = {
+    "simples": (RAG_CONTEXT_FLOOR_SIMPLES, RAG_CONTEXT_CEILING_SIMPLES),
+    "mediana": (RAG_CONTEXT_FLOOR_MEDIANA, RAG_CONTEXT_CEILING_MEDIANA),
+    "complexa": (RAG_CONTEXT_FLOOR_COMPLEXA, RAG_CONTEXT_CEILING_COMPLEXA),
+}
+
+# 9router (OpenAI-compatible). LLAMA_* kept as legacy aliases.
+LLAMA_BASE_URL = os.getenv("NINEROUTER_URL", os.getenv("LLAMA_BASE_URL", "http://localhost:20128")).rstrip("/")
+LLAMA_MODEL = os.getenv("LLM_MODEL", os.getenv("LLAMA_MODEL", "my-combo"))
+LLAMA_N_PREDICT = int(os.getenv("LLM_MAX_TOKENS", os.getenv("LLAMA_N_PREDICT", "8192")))
+LLAMA_TEMPERATURE = float(os.getenv("LLM_TEMPERATURE", os.getenv("LLAMA_TEMPERATURE", "0.7")))
+LLAMA_TIMEOUT = int(os.getenv("LLM_TIMEOUT", os.getenv("LLAMA_TIMEOUT", "600")))

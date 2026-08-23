@@ -2,7 +2,6 @@
 
 from unittest.mock import patch
 
-import numpy as np
 import pytest
 
 from services.rag.generator import generate_campaign
@@ -53,7 +52,7 @@ def test_generate_campaign_with_mock_llm(mock_exists, mock_retrieve):
         llm_fn=fake_llm,
     )
 
-    assert result["generation_source"] == "llama"
+    assert result["generation_source"] == "9router"
     assert result["book_id"] == "test-book"
     assert result["chunks_used"] == 1
     assert "Test Campaign" in result["campaign"]

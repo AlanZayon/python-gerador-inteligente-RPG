@@ -40,6 +40,7 @@ def validate_campaign(
     content: str,
     complexity: str,
     character_names: list[str] | None = None,
+    key_terms: list[str] | None = None,
 ) -> tuple[bool, list[str], int]:
     """Return (passed, issues, quality_score 0-100)."""
     issues: list[str] = []
@@ -58,6 +59,17 @@ def validate_campaign(
     if sessions < lo:
         issues.append(f"Expected at least {lo} sessions, found {sessions}")
 
+    terms = [t for t in (key_terms or []) if t and len(t) > 3]
+    grounding_hits = 0
+    if terms:
+        grounding_hits = sum(1 for t in terms if t.lower() in lower)
+        required = max(1, (len(terms) + 2) // 3)
+        if grounding_hits < required:
+            issues.append(
+                "Campaign does not use enough terms from the source book: "
+                + ", ".join(terms[:10])
+            )
+
     score = 100
     score -= max(0, (min_w - wc) // 50) * 5
     score -= len(issues) * 15
@@ -66,6 +78,9 @@ def validate_campaign(
         missing = [n for n in character_names if n.lower() not in lower]
         if missing and len(missing) < len(character_names):
             score -= min(10, len(missing) * 3)
+
+    if terms:
+        score -= max(0, (len(terms) - grounding_hits) * 2)
 
     score = max(0, min(100, score))
 

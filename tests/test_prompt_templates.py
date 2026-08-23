@@ -28,3 +28,18 @@ def test_prompt_without_sheets_keeps_archetypes():
         system_preset="generic",
     )
     assert "CHARACTER ARCHETYPES" in prompt
+
+
+def test_prompt_uses_book_context_and_grounding_instruction():
+    prompt = build_campaign_prompt(
+        book_context="The city of Valdris drowns beneath the Sahuagin Court.",
+        target_language="en",
+        complexity="mediana",
+        guidelines="- 3 sessions",
+        system_preset="generic",
+        theme="rising tide",
+    )
+    assert "BOOK CONTEXT" in prompt
+    assert "Valdris" in prompt
+    assert "generic fantasy" in prompt.lower()
+    assert "rising tide" in prompt

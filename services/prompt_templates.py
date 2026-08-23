@@ -46,7 +46,8 @@ def _mandatory_sections(character_sheets: str = "") -> str:
 
 def build_campaign_prompt(
     *,
-    book_bible: dict,
+    book_bible: dict | None = None,
+    book_context: str = "",
     target_language: str,
     complexity: str,
     guidelines: str,
@@ -67,7 +68,12 @@ def build_campaign_prompt(
     if theme:
         prefs += f"\nOptional theme/hook: {theme}"
 
-    bible_json = str(book_bible)[:12000]
+    context_block = (book_context or "").strip() or str(book_bible or {})[:12000]
+    grounding = (
+        "Ground the campaign in the book's setting, terminology, and mechanics "
+        "from the excerpts above. Reuse named places, factions, and terms verbatim. "
+        "Do not invent a generic fantasy world if the excerpts describe something specific."
+    )
     sections = _mandatory_sections(character_sheets)
     sheets_block = f"\n\n{character_sheets}\n" if character_sheets else ""
 
@@ -77,8 +83,8 @@ def build_campaign_prompt(
             outline_note = "\nInclude personalized hooks for each player character listed below."
         return f"""You are an expert RPG campaign designer.
 
-BOOK ANALYSIS (from the user's uploaded rulebook):
-{bible_json}
+BOOK CONTEXT (excerpts from the user's uploaded rulebook):
+{context_block}
 {sheets_block}
 SYSTEM RULES:
 {system_block}
@@ -88,6 +94,8 @@ Create a detailed campaign OUTLINE for a {complexity.upper()} campaign in {targe
 {guidelines}
 {outline_note}
 
+{grounding}
+
 Include: title, overview, starting hook, session-by-session bullet outline, key NPCs list, major locations.
 Output in markdown. Language: {target_language}.
 """
@@ -95,8 +103,8 @@ Output in markdown. Language: {target_language}.
     if pass_type == "expand" and outline:
         return f"""You are an expert RPG campaign designer.
 
-BOOK ANALYSIS:
-{bible_json}
+BOOK CONTEXT (excerpts from the user's uploaded rulebook):
+{context_block}
 {sheets_block}
 SYSTEM RULES:
 {system_block}
@@ -110,13 +118,14 @@ OUTLINE TO EXPAND:
 
 {sections}
 
+{grounding}
 Use markdown. Be specific and table-ready. Language: {target_language}.
 """
 
     return f"""You are an expert RPG campaign designer.
 
-BOOK ANALYSIS (from the user's uploaded rulebook):
-{bible_json}
+BOOK CONTEXT (excerpts from the user's uploaded rulebook):
+{context_block}
 {sheets_block}
 SYSTEM RULES:
 {system_block}
@@ -127,17 +136,30 @@ Create a COMPLETE, play-ready {complexity.upper()} campaign in {target_language}
 
 {sections}
 
-Ground the campaign in the book's setting, terminology, and tone from the analysis above.
+{grounding}
 Use markdown. Language: {target_language}.
 """
 
 
-def build_expand_retry_prompt(content: str, issues: list[str], target_language: str) -> str:
+def build_expand_retry_prompt(
+    content: str,
+    issues: list[str],
+    target_language: str,
+    key_terms: list[str] | None = None,
+) -> str:
     issue_list = "\n".join(f"- {i}" for i in issues)
+    terms_note = ""
+    if key_terms:
+        terms_note = (
+            "\nWeave in these terms from the source book: "
+            + ", ".join(key_terms[:10])
+            + "\n"
+        )
     return f"""Improve this RPG campaign draft. Fix these quality issues:
 {issue_list}
-
+{terms_note}
 Expand missing sections. Target language: {target_language}.
+Reuse names and mechanics from the source book; do not replace them with generic fantasy.
 
 DRAFT:
 {content[:25000]}
