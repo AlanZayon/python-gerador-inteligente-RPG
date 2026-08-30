@@ -1,22 +1,21 @@
 # RPG Campaign Generator API
 
-Flask API that transforms RPG rulebook PDFs into ready-to-play campaigns using a local 9router gateway (OpenAI-compatible, with template fallback). Processing is asynchronous via Redis queue and a dedicated worker process.
+Flask API that transforms RPG rulebook PDFs into ready-to-play campaigns using a local 9router gateway (OpenAI-compatible). Processing is asynchronous via Redis queue and a dedicated worker process.
 
 ## Architecture
 
 ```
-Frontend (Vue) → Flask API → Redis queue → worker.py → S3 + 9router
-                     ↓
-              PostgreSQL (users, jobs, billing)
+HTTP client → Flask API → Redis queue → worker.py → S3 + 9router
+                  ↓
+           PostgreSQL (users, jobs, billing)
 ```
 
 - **API** (`app.py`) — upload, enqueue, job status, dashboard, billing
 - **Worker** (`worker.py`) — consumes priority/standard queues, runs pipeline
-- **Tasks** (`tasks/campaign_tasks.py`) — PDF extract → RAG → plan/write/revise → Markdown → S3
+- **Tasks** (`tasks/campaign_tasks.py`) — PDF → RAG → plan/write/revise → Markdown → S3
 
-**Documentation (canonical):** [docs/README.md](docs/README.md) — full system manual in [Portuguese](docs/pt/README.md) and [English](docs/en/README.md). Short pipeline note: [docs/CAMPAIGN_GENERATION.md](docs/CAMPAIGN_GENERATION.md). Evidence placeholders: [docs/evidence/README.md](docs/evidence/README.md).
-
-The Vue UI is a **demo harness** only. This repository is the product.
+**Documentation:** [docs/README.md](docs/README.md)  
+Start with the full flow: [Portuguese](docs/pt/README.md) · [English](docs/en/README.md)
 
 ## Quick start (local)
 
@@ -29,8 +28,6 @@ cp .env.example .env           # fill in AWS, Redis, 9router
 python app.py                  # terminal 1 — API on :5000
 python worker.py               # terminal 2 — job consumer
 ```
-
-Frontend: see [pdf-translate-vue](../pdf-translate-vue) repo.
 
 ## Production deployment (Railway / Render)
 
@@ -48,10 +45,10 @@ worker: python worker.py
 5. Set `FLASK_ENV=production` and **`AUTH_DEV_MODE=false`**
 6. Configure Clerk JWT (`CLERK_JWKS_URL`, `CLERK_ISSUER`)
 
-### Vercel frontend + API
+### CORS and S3
 
-- Configure `CORS_ORIGINS` with your Vercel URL
-- Configure S3 bucket CORS to allow `GET` from your Vercel domain
+- Configure `CORS_ORIGINS` with your client origin(s)
+- Configure S3 bucket CORS for `GET` from those origins
 - Stripe webhook → `https://your-api/billing/webhook`
 
 ## API endpoints
@@ -90,7 +87,7 @@ Copy `.env.example` and configure:
 - **AWS_***, **S3_BUCKET_NAME** — required for uploads
 - **REDIS_URL** — required for async mode
 - **CLERK_JWKS_URL**, **CLERK_ISSUER** — required in production
-- **NINEROUTER_URL**, **NINEROUTER_KEY** — local 9router gateway (replaces Gemini)
+- **NINEROUTER_URL**, **NINEROUTER_KEY** — local 9router gateway
 - **STRIPE_*** — billing (checkout, webhook, price IDs)
 - **SENTRY_DSN** — optional error tracking
 

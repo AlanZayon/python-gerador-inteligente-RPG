@@ -1,29 +1,33 @@
-# 6. API HTTP
+# 5. API HTTP
 
-Base: Flask em `app.py`. JSON salvo onde indicado. Upload é **multipart**.
+[← Pipeline](04-pipeline.md) · [Índice](README.md) · [Seguinte: Operação →](06-operacao.md)
 
-Auth (`services/auth.py`):
+---
 
-1. `Authorization: Bearer` JWT Clerk (JWKS)
-2. `X-API-Key` (hashes em PostgreSQL — rota dashboard de rotação)
+Base: Flask em `app.py`. Upload é **multipart**. Respostas de status/geração são JSON.
+
+## Auth
+
+`services/auth.py`, por ordem:
+
+1. `Authorization: Bearer` — JWT Clerk (JWKS)
+2. `X-API-Key` — chave por utilizador (hash em PostgreSQL)
 3. `AUTH_DEV_MODE=true` + `Bearer dev-token` — **proibido** se `FLASK_ENV=production`
 
-Rate limit Redis: 10 uploads/hora, 60 polls/min, 30 views de share/min por IP (`services/rate_limit.py`).
+Rate limit Redis: 10 uploads/hora, 60 polls/min, 30 views de share/min por IP.
 
-## 6.1 Produto — geração
+## Geração
 
 ### `POST /generate-campaign`
 
-`@require_user` + rate limit. `202` no sucesso.
+`@require_user` · `202` no sucesso.
 
-**multipart**
-
-| Campo | Notas |
+| Campo multipart | Notas |
 |---|---|
 | `file` | PDF do livro (obrigatório) |
 | `target_language` | default `en` |
 | `complexity` | `simples` \| `mediana` \| `complexa` |
-| `system_preset` | ver `/system-presets`; inválido → `generic` |
+| `system_preset` | ver `GET /system-presets`; inválido → `generic` |
 | `party_level` | texto livre |
 | `tone` | texto livre |
 | `theme` | texto livre (também é hook de retrieval) |
@@ -32,8 +36,6 @@ Rate limit Redis: 10 uploads/hora, 60 polls/min, 30 views de share/min por IP (`
 | `sheet_files` | PDFs das fichas |
 
 Header opcional: `Idempotency-Key`.
-
-**202**
 
 ```json
 {
@@ -46,11 +48,11 @@ Header opcional: `Idempotency-Key`.
 }
 ```
 
-Erros típicos: 400 (não PDF / língua / complexidade / fichas), 402/403 quota, 503 Redis.
+Erros típicos: `400` (PDF/língua/complexidade/fichas), quota, `503` Redis.
 
 ### `GET /job-status/<job_id>`
 
-Auth opcional em dev; em produção o dono deve autenticar. Resposta: `build_api_response` — status, progresso, erro, URL pré-assinada quando `completed`.
+Status, progresso, erro, URL pré-assinada quando `completed`.
 
 ### `POST /job-status/<job_id>/refresh-url`
 
@@ -58,9 +60,9 @@ Nova URL pré-assinada do Markdown.
 
 ### `GET /c/<slug>`
 
-Campanha partilhada pública, rate limited.
+Campanha partilhada pública (rate limited).
 
-### Catálogo
+## Catálogo
 
 | Método | Path | Auth |
 |---|---|---|
@@ -73,17 +75,22 @@ Campanha partilhada pública, rate limited.
 | GET | `/legal/content-license` | não |
 | POST | `/detect-system` | conforme app |
 
-## 6.2 Dashboard (`/dashboard`)
+## Dashboard (`/dashboard`)
 
 JWT. `GET /me`, `GET /jobs`, refresh-url, share, content, export markdown/PDF, `POST /api-key`, `POST /jobs/<id>/regenerate-section`.
 
-## 6.3 Billing (`/billing`)
+## Billing (`/billing`)
 
 Stripe: checkout, portal, session, webhook (assinatura + idempotência de evento).
 
-## 6.4 RAG dev (`/rag`)
+## RAG dev (`/rag`)
 
-Ver [04-rag.md](04-rag.md). Sem o mesmo modelo de auth do produto.
+Ver [RAG](03-rag.md). Sem o mesmo modelo de auth do produto.
 
-> **Evidência — 202 + poll**  
-> Caminho esperado: `docs/evidence/job-status-json.png`
+> **Evidência (opcional):** `docs/evidence/job-status-json.png`
+
+Ver também: [Job](02-job.md) · [Operação](06-operacao.md)
+
+---
+
+[← Pipeline](04-pipeline.md) · [Índice](README.md) · [Seguinte: Operação →](06-operacao.md)
