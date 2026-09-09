@@ -51,7 +51,9 @@ def _alembic_config(url: str | None = None):
     root = Path(__file__).resolve().parent
     cfg = Config(str(root / "alembic.ini"))
     cfg.set_main_option("script_location", str(root / "alembic"))
-    cfg.set_main_option("sqlalchemy.url", url or DATABASE_URL)
+    target = url or DATABASE_URL
+    cfg.set_main_option("sqlalchemy.url", target)
+    cfg.attributes["database_url"] = target
     return cfg
 
 
@@ -73,8 +75,8 @@ def run_migrations(url: str | None = None) -> None:
     try:
         tables = set(inspect(target_engine).get_table_names())
         if "users" in tables and "alembic_version" not in tables:
-            command.stamp(cfg, "head")
-            return
+            # Legacy create_all DB: mark baseline applied, then upgrade for newer revisions.
+            command.stamp(cfg, "0001_baseline")
         command.upgrade(cfg, "head")
     finally:
         target_engine.dispose()

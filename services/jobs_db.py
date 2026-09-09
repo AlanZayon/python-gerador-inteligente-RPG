@@ -1,6 +1,8 @@
 """Persist and query jobs in PostgreSQL."""
 
+import json
 from datetime import datetime
+from typing import Any
 
 from database import SessionLocal
 from models.entities import Job
@@ -75,11 +77,28 @@ def update_job_character_sheets(job_id: str, character_sheets_json: str) -> None
         db.close()
 
 
+def update_job_blueprint_seed(job_id: str, blueprint_seed: dict[str, Any] | None) -> None:
+    """Persist normalized Campaign Blueprint seed JSON, or clear when None."""
+    db = SessionLocal()
+    try:
+        job = db.query(Job).filter(Job.id == job_id).first()
+        if not job:
+            return
+        if blueprint_seed is None:
+            job.blueprint_json = None
+        else:
+            job.blueprint_json = json.dumps(blueprint_seed, ensure_ascii=False)
+        db.commit()
+    finally:
+        db.close()
+
+
 def update_job_status(
     job_id: str,
     status: str,
     campaign_s3_key: str | None = None,
     s3_key: str | None = None,
+    blueprint_seed: dict[str, Any] | None = None,
 ) -> None:
     db = SessionLocal()
     try:
@@ -91,6 +110,8 @@ def update_job_status(
             job.campaign_s3_key = campaign_s3_key
         if s3_key:
             job.s3_key = s3_key
+        if blueprint_seed is not None:
+            job.blueprint_json = json.dumps(blueprint_seed, ensure_ascii=False)
         if status == "completed":
             job.completed_at = datetime.utcnow()
         db.commit()

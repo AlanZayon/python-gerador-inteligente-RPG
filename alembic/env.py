@@ -20,11 +20,18 @@ target_metadata = Base.metadata
 
 
 def get_url() -> str:
-    url = config.get_main_option("sqlalchemy.url")
+    # Explicit override from run_migrations / tests (config.attributes)
+    override = config.attributes.get("database_url")
+    if override:
+        return _normalize_database_url(override)
+
     env_url = os.getenv("DATABASE_URL")
     if env_url:
         return _normalize_database_url(env_url)
-    return _normalize_database_url(url or "sqlite:///./arcane_forge.db")
+
+    return _normalize_database_url(
+        config.get_main_option("sqlalchemy.url") or "sqlite:///./arcane_forge.db"
+    )
 
 
 def run_migrations_offline() -> None:

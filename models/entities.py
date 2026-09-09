@@ -48,6 +48,7 @@ class Job(Base):
     use_character_sheets: Mapped[bool] = mapped_column(Boolean, default=False)
     party_size: Mapped[int] = mapped_column(Integer, default=0)
     character_sheets: Mapped[str | None] = mapped_column(Text, nullable=True)
+    blueprint_json: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 

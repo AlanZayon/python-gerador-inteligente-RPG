@@ -558,6 +558,12 @@ def process_campaign_generation(
 
         cleanup_temp_files(local_file_path)
 
+        blueprint_seed = gen_meta.get("blueprint_seed")
+        if blueprint_seed is not None:
+            from services.jobs_db import update_job_blueprint_seed
+
+            update_job_blueprint_seed(job_id, blueprint_seed)
+
         result = {
             "campaign_url": upload_result["file_url"],
             "s3_key": upload_result["s3_key"],

@@ -122,7 +122,13 @@ def process_job(conn, job_id: str) -> None:
             save_result(job_id, result, conn=conn)
             conn.hset(job_key, "status", "completed")
             campaign_s3_key = result.get("s3_key")
-            update_job_status(job_id, "completed", campaign_s3_key=campaign_s3_key, s3_key=input_s3_key)
+            update_job_status(
+                job_id,
+                "completed",
+                campaign_s3_key=campaign_s3_key,
+                s3_key=input_s3_key,
+                blueprint_seed=result.get("blueprint_seed"),
+            )
 
             if user_id:
                 user = get_user_by_id(user_id)

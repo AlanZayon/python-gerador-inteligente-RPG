@@ -165,10 +165,12 @@ def generate_campaign_markdown(
 
     if state is None:
         meta["pipeline"] = "fallback-full"
+        meta["blueprint_seed"] = None
         prompt = fallback_full_prompt or plan_prompt
         return llm_fn(prompt), meta
 
     meta["plan_used"] = True
+    meta["blueprint_seed"] = state
     meta["title"] = state.get("title")
     digest = state_digest(state)
     if key_terms and not state.get("grounded_terms"):

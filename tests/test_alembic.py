@@ -19,6 +19,7 @@ def test_alembic_upgrade_head_creates_core_tables(tmp_path):
     cfg = Config(str(ROOT / "alembic.ini"))
     cfg.set_main_option("script_location", str(ROOT / "alembic"))
     cfg.set_main_option("sqlalchemy.url", url)
+    cfg.attributes["database_url"] = url
 
     command.upgrade(cfg, "head")
 
@@ -37,21 +38,36 @@ def test_alembic_upgrade_head_creates_core_tables(tmp_path):
         assert "use_character_sheets" in job_cols
         assert "party_size" in job_cols
         assert "character_sheets" in job_cols
+        assert "blueprint_json" in job_cols
     finally:
         engine.dispose()
 
 
 def test_run_migrations_stamps_legacy_schema_without_alembic_version(tmp_path):
-    """Legacy DBs created with create_all get stamped, not recreated."""
+    """Legacy DBs created with create_all get stamped, then upgraded for newer revisions."""
     from database import Base
     import models.entities  # noqa: F401
 
     db_path = tmp_path / "legacy.db"
     url = f"sqlite:///{db_path.as_posix()}"
     engine = create_engine(url)
+    # Simulate pre-blueprint schema: drop blueprint_json if present after create_all
     Base.metadata.create_all(bind=engine)
+    with engine.begin() as conn:
+        # Force a legacy shape without blueprint_json for SQLite
+        cols = {c["name"] for c in inspect(engine).get_columns("jobs")}
+        if "blueprint_json" in cols:
+            conn.exec_driver_sql(
+                "CREATE TABLE jobs_old AS SELECT id, user_id, status, complexity, language, "
+                "filename, s3_key, campaign_s3_key, credits_charged, idempotency_key, share_slug, "
+                "share_public, system_preset, use_character_sheets, party_size, character_sheets, "
+                "created_at, completed_at FROM jobs"
+            )
+            conn.exec_driver_sql("DROP TABLE jobs")
+            conn.exec_driver_sql("ALTER TABLE jobs_old RENAME TO jobs")
     assert "users" in inspect(engine).get_table_names()
     assert "alembic_version" not in inspect(engine).get_table_names()
+    assert "blueprint_json" not in {c["name"] for c in inspect(engine).get_columns("jobs")}
     engine.dispose()
 
     run_migrations(url)
@@ -61,5 +77,7 @@ def test_run_migrations_stamps_legacy_schema_without_alembic_version(tmp_path):
         tables = set(inspect(engine).get_table_names())
         assert "alembic_version" in tables
         assert "users" in tables
+        job_cols = {c["name"] for c in inspect(engine).get_columns("jobs")}
+        assert "blueprint_json" in job_cols
     finally:
         engine.dispose()

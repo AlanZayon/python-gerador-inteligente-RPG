@@ -18,6 +18,7 @@ def test_pipeline_falls_back_when_plan_is_not_json():
         fallback_full_prompt="# Overview\nBOOK CONTEXT Valdris\nSession 1\nReady.",
     )
     assert meta["pipeline"] == "fallback-full"
+    assert meta.get("blueprint_seed") is None
     assert "Valdris" in markdown or "Overview" in markdown
 
 
@@ -57,5 +58,8 @@ def test_pipeline_writes_from_valid_plan():
         fallback_full_prompt="# unused",
     )
     assert meta["plan_used"] is True
+    assert meta.get("blueprint_seed") is not None
+    assert meta["blueprint_seed"]["title"]
+    assert isinstance(meta["blueprint_seed"].get("sessions"), list)
     assert "Salt" in markdown or "Valdris" in markdown
     assert calls["n"] >= 3
