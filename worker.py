@@ -128,6 +128,7 @@ def process_job(conn, job_id: str) -> None:
                 campaign_s3_key=campaign_s3_key,
                 s3_key=input_s3_key,
                 blueprint_seed=result.get("blueprint_seed"),
+                book_id=result.get("book_id"),
             )
 
             if user_id:

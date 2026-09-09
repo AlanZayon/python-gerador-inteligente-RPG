@@ -559,10 +559,25 @@ def process_campaign_generation(
         cleanup_temp_files(local_file_path)
 
         blueprint_seed = gen_meta.get("blueprint_seed")
-        if blueprint_seed is not None:
+        if blueprint_seed is not None or indexed.get("book_id"):
             from services.jobs_db import update_job_blueprint_seed
 
-            update_job_blueprint_seed(job_id, blueprint_seed)
+            if blueprint_seed is not None:
+                update_job_blueprint_seed(job_id, blueprint_seed)
+            # Persist book identity early so Create Campaign can run even if worker path differs
+            db_job_book = indexed.get("book_id")
+            if db_job_book:
+                from database import SessionLocal
+                from models.entities import Job as JobModel
+
+                db = SessionLocal()
+                try:
+                    row = db.query(JobModel).filter(JobModel.id == job_id).first()
+                    if row:
+                        row.book_id = db_job_book
+                        db.commit()
+                finally:
+                    db.close()
 
         result = {
             "campaign_url": upload_result["file_url"],

@@ -49,10 +49,44 @@ class Job(Base):
     party_size: Mapped[int] = mapped_column(Integer, default=0)
     character_sheets: Mapped[str | None] = mapped_column(Text, nullable=True)
     blueprint_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    book_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
     user: Mapped["User"] = relationship(back_populates="jobs")
+
+
+class Campaign(Base):
+    __tablename__ = "campaigns"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    job_id: Mapped[str] = mapped_column(String(36), ForeignKey("jobs.id"), unique=True, index=True)
+    host_user_id: Mapped[str] = mapped_column(String(36), ForeignKey("users.id"), index=True)
+    book_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    title: Mapped[str] = mapped_column(String(512), default="")
+    blueprint_json: Mapped[str] = mapped_column(Text, default="{}")
+    manuscript_s3_key: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    status: Mapped[str] = mapped_column(String(32), default="ready")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+    characters: Mapped[list["CampaignCharacter"]] = relationship(
+        back_populates="campaign",
+        order_by="CampaignCharacter.sort_order",
+    )
+
+
+class CampaignCharacter(Base):
+    __tablename__ = "campaign_characters"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    campaign_id: Mapped[str] = mapped_column(String(36), ForeignKey("campaigns.id"), index=True)
+    display_name: Mapped[str] = mapped_column(String(255), default="")
+    sheet_json: Mapped[str] = mapped_column(Text, default="{}")
+    sort_order: Mapped[int] = mapped_column(Integer, default=0)
+    claimable: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+    campaign: Mapped["Campaign"] = relationship(back_populates="characters")
 
 
 class Subscription(Base):

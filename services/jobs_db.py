@@ -99,6 +99,7 @@ def update_job_status(
     campaign_s3_key: str | None = None,
     s3_key: str | None = None,
     blueprint_seed: dict[str, Any] | None = None,
+    book_id: str | None = None,
 ) -> None:
     db = SessionLocal()
     try:
@@ -112,6 +113,8 @@ def update_job_status(
             job.s3_key = s3_key
         if blueprint_seed is not None:
             job.blueprint_json = json.dumps(blueprint_seed, ensure_ascii=False)
+        if book_id:
+            job.book_id = book_id
         if status == "completed":
             job.completed_at = datetime.utcnow()
         db.commit()
