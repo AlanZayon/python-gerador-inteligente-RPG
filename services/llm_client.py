@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 import time
@@ -133,6 +134,35 @@ def complete(
     max_tokens: int | None = None,
 ) -> str:
     """Send a single-turn prompt to 9router and return assistant text."""
+    result = chat_completion(
+        messages=[{"role": "user", "content": prompt}],
+        model=model,
+        temperature=temperature,
+        max_tokens=max_tokens,
+        purpose="complete",
+    )
+    text = ((result.get("message") or {}).get("content") or "").strip()
+    if not text:
+        raise LLMError("Empty text from 9router")
+    return text
+
+
+def chat_completion(
+    *,
+    messages: list[dict],
+    tools: list[dict] | None = None,
+    model: str | None = None,
+    temperature: float | None = None,
+    max_tokens: int | None = None,
+    purpose: str = "chat",
+) -> dict:
+    """OpenAI-compatible chat completions with optional tool calling.
+
+    Returns:
+        {
+          message, tool_calls: [{id,name,args}], usage, model, latency_ms, raw
+        }
+    """
     if not is_configured():
         raise LLMUnavailable("9router API key is not configured")
 
@@ -141,16 +171,21 @@ def complete(
         "Authorization": f"Bearer {_api_key()}",
         "Content-Type": "application/json",
     }
-    body = {
-        "model": model or default_model(),
-        "messages": [{"role": "user", "content": prompt}],
+    chosen_model = model or default_model()
+    body: dict = {
+        "model": chosen_model,
+        "messages": messages,
         "stream": False,
         "temperature": _temperature() if temperature is None else temperature,
         "max_tokens": _max_tokens() if max_tokens is None else max_tokens,
     }
+    if tools:
+        body["tools"] = tools
+        body["tool_choice"] = "auto"
 
     last_error: Exception | None = None
     attempts = max(1, _retry_attempts())
+    started = time.perf_counter()
     for attempt in range(1, attempts + 1):
         try:
             response = requests.post(url, json=body, headers=headers, timeout=_timeout())
@@ -160,7 +195,27 @@ def complete(
                 raise LLMUnavailable(response.text[:500] or "9router has no available accounts")
             if response.status_code >= 400:
                 raise LLMError(f"9router HTTP {response.status_code}: {response.text[:500]}")
-            return _extract_text(response.json())
+            payload = response.json()
+            latency_ms = (time.perf_counter() - started) * 1000.0
+            message, tool_calls = _extract_message_and_tools(payload)
+            usage = payload.get("usage") or {}
+            logger.info(
+                "llm_chat purpose=%s model=%s latency_ms=%.1f prompt_tokens=%s completion_tokens=%s",
+                purpose,
+                chosen_model,
+                latency_ms,
+                usage.get("prompt_tokens"),
+                usage.get("completion_tokens"),
+            )
+            return {
+                "message": message,
+                "tool_calls": tool_calls,
+                "usage": usage,
+                "model": chosen_model,
+                "latency_ms": latency_ms,
+                "purpose": purpose,
+                "raw": payload,
+            }
         except LLMUnavailable:
             raise
         except Exception as exc:
@@ -172,6 +227,51 @@ def complete(
             time.sleep(wait)
 
     raise last_error or LLMError("9router request failed")
+
+
+def _extract_message_and_tools(payload: dict) -> tuple[dict, list[dict]]:
+    choices = payload.get("choices") or []
+    if not choices:
+        raise LLMError("Empty response from 9router")
+    choice = choices[0] if isinstance(choices[0], dict) else {}
+    message = choice.get("message") or {}
+    if not isinstance(message, dict):
+        message = {"role": "assistant", "content": str(message)}
+
+    content = message.get("content")
+    if isinstance(content, list):
+        parts: list[str] = []
+        for part in content:
+            if isinstance(part, str):
+                parts.append(part)
+            elif isinstance(part, dict):
+                parts.append(str(part.get("text") or part.get("content") or ""))
+        message = {**message, "content": "".join(parts)}
+
+    tool_calls: list[dict] = []
+    for tc in message.get("tool_calls") or []:
+        if not isinstance(tc, dict):
+            continue
+        fn = tc.get("function") or {}
+        args_raw = fn.get("arguments")
+        args: dict | str | None
+        if isinstance(args_raw, dict):
+            args = args_raw
+        elif isinstance(args_raw, str):
+            try:
+                args = json.loads(args_raw) if args_raw.strip() else {}
+            except json.JSONDecodeError:
+                args = args_raw
+        else:
+            args = {}
+        tool_calls.append(
+            {
+                "id": tc.get("id"),
+                "name": fn.get("name") or tc.get("name") or "",
+                "args": args,
+            }
+        )
+    return message, tool_calls
 
 
 def health_check() -> bool:

@@ -17,7 +17,7 @@ from services.auth import (
     resolve_auth_context,
 )
 from services.play import hub as hub_module
-from services.play.gm import MockGMLLM, submit_player_action
+from services.play.gm import resolve_gm_llm, submit_player_action
 from services.play.sync import SyncError, get_reconnect_snapshot, set_presence
 from services.users import get_or_create_user
 
@@ -116,7 +116,7 @@ def register_session_sockets(app):
                     if not text:
                         continue
                     try:
-                        submit_player_action(user.id, session_id, text, llm=MockGMLLM())
+                        submit_player_action(user.id, session_id, text, llm=resolve_gm_llm())
                     except Exception as exc:  # noqa: BLE001
                         ws.send(
                             json.dumps(

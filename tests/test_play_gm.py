@@ -34,6 +34,10 @@ def live_table(monkeypatch):
     monkeypatch.setattr("services.play.sessions.SessionLocal", Session)
     monkeypatch.setattr("services.play.gm.runtime.SessionLocal", Session)
     monkeypatch.setattr("services.play.gm.actions.SessionLocal", Session)
+    monkeypatch.setattr(
+        "services.play.gm.runtime.retrieve_gm_rules",
+        lambda **kwargs: [],
+    )
 
     import services.play.gm.actions as actions_mod
 
@@ -163,7 +167,9 @@ def test_two_rapid_actions_serialize_without_corrupting_state(live_table):
                 )
             )
         except Exception as exc:  # noqa: BLE001
-            errors.append(exc)
+            import traceback
+
+            errors.append(f"{exc!r}\n{traceback.format_exc()}")
 
     t1 = threading.Thread(target=act, args=(live_table["host"].id, "I open the chest."))
     t2 = threading.Thread(target=act, args=(live_table["p2"].id, "I watch the door."))

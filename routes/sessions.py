@@ -14,7 +14,7 @@ from services.play.sessions import (
     set_ready,
     start_game_session,
 )
-from services.play.gm import ActionError, MockGMLLM, submit_player_action
+from services.play.gm import ActionError, resolve_gm_llm, submit_player_action
 from services.play.sync import SyncError, get_reconnect_snapshot
 
 sessions_bp = Blueprint("sessions", __name__, url_prefix="/sessions")
@@ -144,7 +144,7 @@ def submit_action(session_id: str):
     if not text:
         return jsonify({"error": "text is required"}), 400
     try:
-        result = submit_player_action(g.user.id, session_id, text, llm=MockGMLLM())
+        result = submit_player_action(g.user.id, session_id, text, llm=resolve_gm_llm())
     except (SessionError, ActionError) as exc:
         return _error(exc)
     return jsonify({"success": True, **result})

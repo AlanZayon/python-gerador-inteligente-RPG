@@ -86,3 +86,46 @@ def test_complete_raises_when_unconfigured(monkeypatch):
     monkeypatch.delenv("LLM_API_KEY", raising=False)
     with pytest.raises(llm_client.LLMUnavailable):
         llm_client.complete("hello")
+
+
+def test_chat_completion_parses_tool_calls(monkeypatch):
+    monkeypatch.setenv("NINEROUTER_URL", "http://localhost:20128")
+    monkeypatch.setenv("NINEROUTER_KEY", "sk-test-key-abcdefghij")
+
+    mock_response = MagicMock()
+    mock_response.status_code = 200
+    mock_response.json.return_value = {
+        "choices": [
+            {
+                "message": {
+                    "role": "assistant",
+                    "content": "",
+                    "tool_calls": [
+                        {
+                            "id": "call_1",
+                            "type": "function",
+                            "function": {
+                                "name": "roll_dice",
+                                "arguments": '{"notation":"1d20"}',
+                            },
+                        }
+                    ],
+                }
+            }
+        ],
+        "usage": {"prompt_tokens": 11, "completion_tokens": 3},
+    }
+
+    with patch("services.llm_client.requests.post", return_value=mock_response) as mock_post:
+        result = llm_client.chat_completion(
+            messages=[{"role": "user", "content": "roll"}],
+            tools=[{"type": "function", "function": {"name": "roll_dice"}}],
+            purpose="gm_turn",
+        )
+
+    assert result["tool_calls"][0]["name"] == "roll_dice"
+    assert result["tool_calls"][0]["args"]["notation"] == "1d20"
+    assert result["usage"]["prompt_tokens"] == 11
+    assert result["purpose"] == "gm_turn"
+    assert "latency_ms" in result
+    assert mock_post.call_args.kwargs["json"]["tools"]

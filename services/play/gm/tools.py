@@ -54,6 +54,35 @@ TOOL_SPECS = [
     },
 ]
 
+TOOL_NAMES = {spec["name"] for spec in TOOL_SPECS}
+
+
+def openai_tool_definitions() -> list[dict]:
+    """OpenAI-compatible tools array for chat completions."""
+    tools = []
+    for spec in TOOL_SPECS:
+        props = {}
+        required = []
+        for key, desc in (spec.get("parameters") or {}).items():
+            props[key] = {"type": "string", "description": str(desc)}
+            if "optional" not in str(desc).lower():
+                required.append(key)
+        tools.append(
+            {
+                "type": "function",
+                "function": {
+                    "name": spec["name"],
+                    "description": spec["description"],
+                    "parameters": {
+                        "type": "object",
+                        "properties": props,
+                        "additionalProperties": True,
+                    },
+                },
+            }
+        )
+    return tools
+
 
 class ToolContext:
     def __init__(

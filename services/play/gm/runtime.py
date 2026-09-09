@@ -7,10 +7,12 @@ from typing import Any
 
 from database import SessionLocal
 from models.entities import Campaign, CampaignCharacter, GameSession, SessionPlayer
-from services.play.events import event_to_envelope
 from services.play import hub as hub_module
+from services.play.events import event_to_envelope
 from services.play.gm.errors import ActionError
-from services.play.gm.mock_llm import MockGMLLM
+from services.play.gm.live_llm import validate_tool_calls
+from services.play.gm.provider import resolve_gm_llm
+from services.play.gm.rag_context import retrieve_gm_rules
 from services.play.gm.state import load_state
 from services.play.gm.tools import DiceRng, ToolContext, execute_tool
 
@@ -22,8 +24,9 @@ def run_gm_flight(
     player_action: str,
     llm: Any | None = None,
     dice_rng: DiceRng | None = None,
+    retrieve_fn=None,
 ) -> dict:
-    llm = llm or MockGMLLM()
+    llm = llm or resolve_gm_llm()
     db = SessionLocal()
     try:
         gs = db.query(GameSession).filter(GameSession.id == session_id).first()
@@ -48,18 +51,29 @@ def run_gm_flight(
                 blueprint = {}
 
         ctx = ToolContext(db, gs, user_id, character_id, dice_rng=dice_rng)
+        state = ctx.state
+        rules_excerpts = retrieve_gm_rules(
+            book_id=campaign.book_id if campaign else None,
+            player_action=player_action,
+            scene=state.get("scene") or gs.current_scene or "",
+            location=state.get("location") or "",
+            character_name=character.display_name if character else "",
+            retrieve_fn=retrieve_fn,
+        )
         context = {
             "player_action": player_action,
             "actor_user_id": user_id,
             "actor_character_id": character_id,
             "character_name": character.display_name if character else "",
             "role": membership.role if membership else "player",
-            "campaign_state": ctx.state,
+            "campaign_state": state,
             "blueprint": blueprint,
             "session_status": gs.status,
+            "book_id": campaign.book_id if campaign else None,
+            "rules_excerpts": rules_excerpts,
         }
         turn = llm.complete_turn(context)
-        for call in turn.tool_calls:
+        for call in validate_tool_calls(turn.tool_calls or []):
             execute_tool(ctx, call["name"], call.get("args") or {})
 
         narration = turn.narration
@@ -71,9 +85,23 @@ def run_gm_flight(
         if not narration:
             narration = "The moment hangs in the air."
 
+        observability = getattr(llm, "last_observability", None) or {
+            "purpose": "gm_turn",
+            "provider": type(llm).__name__,
+            "model": None,
+            "latency_ms": None,
+        }
+
         ctx.append_event(
             "gm_narration",
-            {"text": narration, "player_action": player_action},
+            {
+                "text": narration,
+                "player_action": player_action,
+                "observability": {
+                    k: observability.get(k)
+                    for k in ("purpose", "provider", "model", "latency_ms", "prompt_tokens", "completion_tokens")
+                },
+            },
         )
         ctx.persist_state(bump_version=True)
 
@@ -88,6 +116,8 @@ def run_gm_flight(
             "state_version": gs.state_version,
             "events": ctx.events_out,
             "tool_results": ctx.tool_results,
+            "rules_excerpts": rules_excerpts,
+            "observability": observability,
         }
     except Exception:
         db.rollback()
