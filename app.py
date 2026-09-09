@@ -29,7 +29,7 @@ from services.validation import (
     validate_language,
     validate_pdf_magic_bytes,
 )
-from services.quota import QuotaError, check_and_deduct, quota_error_response, plan_allows_character_sheets
+from services.quota import check_and_deduct
 from services.jobs_db import create_job_record, get_job_for_user, get_job_by_share_slug
 from services.legal_content import CONTENT_LICENSE
 from services.system_presets import SYSTEM_PRESETS
@@ -40,7 +40,6 @@ from services.sheet_validation import (
     validate_sheet_file_size,
 )
 from services.sentry_init import init_sentry
-from routes.billing import billing_bp
 from routes.dashboard import dashboard_bp
 from routes.rag import rag_bp
 
@@ -70,7 +69,6 @@ CORS_ORIGINS = os.getenv(
 
 app = Flask(__name__)
 CORS(app, origins=[o.strip() for o in CORS_ORIGINS if o.strip()])
-app.register_blueprint(billing_bp)
 app.register_blueprint(dashboard_bp)
 app.register_blueprint(rag_bp, url_prefix="/rag")
 
@@ -112,10 +110,6 @@ def _error_message(exc: Exception) -> str:
 
 def allowed_file(filename: str) -> bool:
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
-
-
-def _queue_for_plan(plan: str) -> str:
-    return PRIORITY_JOBS_QUEUE if plan in ("pro", "studio") else PENDING_JOBS_QUEUE
 
 
 def trigger_worker() -> None:
@@ -217,16 +211,6 @@ def generate_campaign():
         party_size = clamp_party_size(request.form.get('party_size')) if use_character_sheets else 0
         sheet_files = request.files.getlist('sheet_files') if use_character_sheets else []
 
-        if use_character_sheets and not plan_allows_character_sheets(g.user.plan):
-            return quota_error_response(QuotaError(
-                "Plan restriction",
-                {
-                    "error": "plan_restriction",
-                    "message": "Character sheets require Pro or Studio plan.",
-                    "upgrade_url": f"{FRONTEND_URL}/pricing",
-                },
-            ))
-
         if use_character_sheets:
             count_err = validate_sheet_file_count(sheet_files, party_size)
             if count_err:
@@ -279,14 +263,7 @@ def generate_campaign():
                     return jsonify({'error': f'Character sheet {i + 1} is not a valid PDF'}), 400
                 sheet_temp_paths.append(sheet_path)
 
-        try:
-            credits_charged = check_and_deduct(g.user, campaign_complexity, job_id)
-        except QuotaError as exc:
-            os.remove(input_pdf)
-            for p in sheet_temp_paths:
-                if os.path.exists(p):
-                    os.remove(p)
-            return quota_error_response(exc)
+        credits_charged = check_and_deduct(g.user, campaign_complexity, job_id)
 
         existing = create_job_record(
             job_id=job_id,
@@ -350,8 +327,7 @@ def generate_campaign():
         }
         redis_conn.hset(job_key, mapping=redis_mapping)
 
-        queue_name = _queue_for_plan(g.user.plan)
-        redis_conn.rpush(queue_name, job_id)
+        redis_conn.rpush(PENDING_JOBS_QUEUE, job_id)
         save_status(job_id, "queued", {"progress": "Waiting for processing...", "progress_percent": 3}, conn=create_redis_client())
 
         try:
@@ -359,14 +335,10 @@ def generate_campaign():
         except Exception as e:
             logger.error("Falha ao disparar worker: %s", e)
 
-        from services.users import get_user_by_id
-        fresh_user = get_user_by_id(g.user.id)
         return jsonify({
             'success': True,
             'job_id': job_id,
             'status': 'queued',
-            'credits_charged': credits_charged,
-            'credits_remaining': fresh_user.credits_balance if fresh_user else 0,
             'message': 'Job queued for processing',
         }), 202
 
@@ -486,7 +458,6 @@ def get_campaign_complexities():
             'description': 'Direct story, perfect for one-shots or introductions',
             'duration': '3-8 hours total',
             'focus': 'Combat and clear objectives',
-            'credits': 1,
         },
         'mediana': {
             'name': 'Medium Campaign',
@@ -494,7 +465,6 @@ def get_campaign_complexities():
             'description': 'Balance of combat, exploration, and character development',
             'duration': '9-16 hours total',
             'focus': 'Branching story and meaningful choices',
-            'credits': 2,
         },
         'complexa': {
             'name': 'Complex Campaign',
@@ -502,7 +472,6 @@ def get_campaign_complexities():
             'description': 'Epic arc with multiple paths and consequences',
             'duration': '17+ hours total',
             'focus': 'Deep narrative and character arcs',
-            'credits': 4,
         },
     }
     return jsonify(complexities)

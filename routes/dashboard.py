@@ -11,15 +11,12 @@ from models.entities import User
 from services.auth import require_user
 from services.campaign_parse import build_job_meta, extract_title, slugify_title
 from services.jobs_db import get_job_for_user, list_user_jobs, set_job_share
-from services.quota import CREDIT_COSTS
 from services.s3_storage import fetch_s3_text, generate_presigned_url
 from services.job_status import get_status, save_result, save_status
 from services.pdf_export import campaign_markdown_to_pdf
-from services.quota import check_and_deduct, QuotaError, quota_error_response
 from tasks.campaign_tasks import regenerate_section
 from services.s3_storage import upload_content_to_s3
 import json
-from services.users import PLAN_CREDITS
 
 dashboard_bp = Blueprint("dashboard", __name__, url_prefix="/dashboard")
 
@@ -27,15 +24,9 @@ dashboard_bp = Blueprint("dashboard", __name__, url_prefix="/dashboard")
 @dashboard_bp.route("/me", methods=["GET"])
 @require_user
 def get_me():
-    plan = g.user.plan
     return jsonify({
         "id": g.user.id,
         "email": g.user.email,
-        "plan": plan,
-        "credits_balance": g.user.credits_balance,
-        "plan_credits_monthly": PLAN_CREDITS.get(plan, 1),
-        "credit_costs": CREDIT_COSTS,
-        "has_stripe": bool(g.user.stripe_customer_id),
         "has_api_key": bool(g.user.api_key_hash),
     })
 
@@ -83,8 +74,6 @@ def refresh_job_url(job_id):
 @dashboard_bp.route("/jobs/<job_id>/share", methods=["POST"])
 @require_user
 def share_job(job_id):
-    if g.user.plan not in ("pro", "studio"):
-        return jsonify({"error": "Share links require Pro or Studio plan", "upgrade_url": "/pricing"}), 402
     slug = secrets.token_urlsafe(8)[:12]
     if not set_job_share(job_id, g.user.id, slug, True):
         return jsonify({"error": "Cannot share this campaign"}), 400
@@ -138,8 +127,6 @@ def export_markdown(job_id):
 @dashboard_bp.route("/jobs/<job_id>/export/pdf", methods=["GET"])
 @require_user
 def export_pdf(job_id):
-    if g.user.plan not in ("pro", "studio"):
-        return jsonify({"error": "PDF export requires Pro or Studio plan"}), 402
     job, content = _load_completed_campaign(job_id, g.user.id)
     if not job:
         return jsonify({"error": "Campaign not available"}), 404
@@ -162,8 +149,6 @@ def export_pdf(job_id):
 @dashboard_bp.route("/api-key", methods=["POST"])
 @require_user
 def generate_api_key():
-    if g.user.plan != "studio":
-        return jsonify({"error": "API access requires Studio plan"}), 402
     raw_key = f"af_{secrets.token_urlsafe(32)}"
     key_hash = hashlib.sha256(raw_key.encode()).hexdigest()
     db = SessionLocal()
@@ -186,11 +171,6 @@ def regenerate_section_endpoint(job_id):
     job = get_job_for_user(job_id, g.user.id)
     if not job or job.status != "completed" or not job.campaign_s3_key:
         return jsonify({"error": "Campaign not available"}), 404
-
-    try:
-        check_and_deduct(g.user, "simples", job_id)
-    except QuotaError as exc:
-        return quota_error_response(exc)
 
     content = fetch_s3_text(job.campaign_s3_key)
     if not content:

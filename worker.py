@@ -19,7 +19,6 @@ from database import init_db
 from services.email import send_campaign_complete_email
 from services.job_status import get_status, mark_failed, save_result, save_status
 from services.jobs_db import update_job_status
-from services.quota import refund_credits
 from services.redis_client import (
     PENDING_JOBS_QUEUE,
     PRIORITY_JOBS_QUEUE,
@@ -145,13 +144,9 @@ def process_job(conn, job_id: str) -> None:
 
 
 def _fail_job(conn, job_id: str, user_id: str | None, credits_charged: int, reason: str) -> None:
-    if credits_charged > 0 and user_id:
-        reason = f"{reason} Credits refunded automatically."
     mark_failed(job_id, reason, conn=conn)
     conn.hset(f"rpg:job:{job_id}", "status", "failed")
     update_job_status(job_id, "failed")
-    if user_id and credits_charged > 0:
-        refund_credits(user_id, credits_charged, job_id)
     ack_job(conn, job_id)
 
 

@@ -281,7 +281,7 @@ def _generate_campaign_content(
 ) -> tuple[str, dict]:
     """Multi-pass generation. Returns (markdown, metadata)."""
     if not is_configured():
-        raise GenerationFailedError("AI generation unavailable — credits will be refunded")
+        raise GenerationFailedError("AI generation unavailable")
 
     model_name = model_for_complexity(campaign_complexity)
     guidelines = get_complexity_guidelines(campaign_complexity)
@@ -531,7 +531,7 @@ def process_campaign_generation(
         if not is_configured():
             mark_failed(
                 job_id,
-                "AI generation unavailable. Your credits have been refunded.",
+                "AI generation unavailable.",
             )
             cleanup_temp_files(local_file_path)
             return None
