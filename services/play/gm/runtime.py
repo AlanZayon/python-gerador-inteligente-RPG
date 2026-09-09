@@ -30,6 +30,8 @@ def run_gm_flight(
     llm: Any | None = None,
     dice_rng: DiceRng | None = None,
     retrieve_fn=None,
+    tts: Any | None = None,
+    speak: bool = True,
 ) -> dict:
     llm = llm or resolve_gm_llm()
     db = SessionLocal()
@@ -140,12 +142,46 @@ def run_gm_flight(
                 },
             },
         )
+
+        audio_dict = None
+        audio_envelope = None
+        if speak:
+            try:
+                from services.voice import resolve_tts
+
+                tts_provider = tts if tts is not None else resolve_tts()
+                audio = tts_provider.synthesize(table_narration)
+                audio_dict = audio.to_dict()
+                # Ephemeral hub delivery — do not persist base64 blobs in game_events.
+                audio_envelope = {
+                    "version": 1,
+                    "type": "gm_audio",
+                    "session_id": session_id,
+                    "event_id": None,
+                    "seq": None,
+                    "actor_id": user_id,
+                    "target_id": None,
+                    "payload": {
+                        "content_type": audio_dict["content_type"],
+                        "data_base64": audio_dict["data_base64"],
+                        "byte_length": audio_dict["byte_length"],
+                        "for_narration": True,
+                    },
+                    "created_at": None,
+                }
+            except Exception:
+                # Text-first: voice misconfiguration must not soft-lock the table.
+                audio_dict = None
+                audio_envelope = None
+
         ctx.persist_state(bump_version=True)
 
         envelopes = [event_to_envelope(ev) for ev in ctx._pending_publish]
         db.commit()
         for envelope in envelopes:
             hub_module.default_hub.publish(session_id, envelope)
+        if audio_envelope:
+            hub_module.default_hub.publish(session_id, audio_envelope)
         db.refresh(gs)
         return {
             "narration": table_narration,
@@ -156,6 +192,8 @@ def run_gm_flight(
             "rules_excerpts": rules_excerpts,
             "observability": observability,
             "memories_player": memories_player,
+            "audio": audio_dict,
+            "actor_user_id": user_id,
         }
     except Exception:
         db.rollback()

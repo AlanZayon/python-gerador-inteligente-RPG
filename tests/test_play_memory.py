@@ -102,7 +102,7 @@ def live_table(monkeypatch):
     set_ready(p2.id, gs.id, True)
     start_game_session(host.id, gs.id)
 
-    yield {
+    payload = {
         "Session": Session,
         "host": host,
         "p2": p2,
@@ -111,6 +111,7 @@ def live_table(monkeypatch):
         "session_id": gs.id,
     }
     db.close()
+    yield payload
 
 
 class MemoryScriptLLM(MockGMLLM):

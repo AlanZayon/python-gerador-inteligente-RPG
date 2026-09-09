@@ -49,13 +49,15 @@ def submit_player_action(
     text: str,
     llm: Any | None = None,
     dice_rng: DiceRng | None = None,
+    tts: Any | None = None,
+    speak: bool = True,
 ) -> dict:
     action_text = (text or "").strip()
     if not action_text:
         raise ActionError("invalid", "Action text is required")
 
-    # Fast pre-check (also re-checked under the session lock before flight).
-    _validate_actor(user_id, session_id)
+    # Membership/character checks run under the session lock only. A pre-lock DB
+    # round-trip races on SQLite StaticPool when two threads open SessionLocal.
 
     done = threading.Event()
     slot: dict[str, Any] = {
@@ -63,6 +65,8 @@ def submit_player_action(
         "text": action_text,
         "llm": llm,
         "dice_rng": dice_rng,
+        "tts": tts,
+        "speak": speak,
         "result": None,
         "error": None,
         "done": done,
@@ -85,13 +89,13 @@ def submit_player_action(
                     next_slot["text"],
                     llm=next_slot["llm"],
                     dice_rng=next_slot["dice_rng"],
+                    tts=next_slot.get("tts"),
+                    speak=bool(next_slot.get("speak", True)),
                 )
             except Exception as exc:  # noqa: BLE001
                 next_slot["error"] = exc
             next_slot["done"].set()
             if next_slot is slot:
-                # Keep draining so later enqueued actions are not stranded if their
-                # threads are waiting on our lock holder.
                 continue
 
     if not done.wait(timeout=120):

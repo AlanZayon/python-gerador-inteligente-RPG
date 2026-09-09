@@ -96,7 +96,7 @@ def live_table(monkeypatch):
     set_ready(p2.id, gs.id, True)
     start_game_session(host.id, gs.id)
 
-    yield {
+    payload = {
         "Session": Session,
         "host": host,
         "p2": p2,
@@ -104,7 +104,10 @@ def live_table(monkeypatch):
         "chars": chars,
         "session_id": gs.id,
     }
+    # Release the fixture connection before tests; StaticPool shares one SQLite
+    # connection and a held Session races with concurrent GM flights.
     db.close()
+    yield payload
 
 
 def test_member_with_character_can_submit_text_action(live_table):

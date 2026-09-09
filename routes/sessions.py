@@ -16,6 +16,8 @@ from services.play.sessions import (
 )
 from services.play.gm import ActionError, resolve_gm_llm, submit_player_action
 from services.play.sync import SyncError, get_reconnect_snapshot
+from services.play.voice_actions import submit_voice_action
+from services.voice import resolve_stt, resolve_tts
 
 sessions_bp = Blueprint("sessions", __name__, url_prefix="/sessions")
 
@@ -29,6 +31,8 @@ def _error(exc: SessionError | ActionError | SyncError):
         "character_taken": 409,
         "not_ready": 400,
         "invalid": 400,
+        "stt_failed": 502,
+        "timeout": 504,
     }.get(exc.code, 400)
     return jsonify({"error": exc.code, "message": exc.message}), status
 
@@ -143,8 +147,41 @@ def submit_action(session_id: str):
     text = (body.get("text") or "").strip()
     if not text:
         return jsonify({"error": "text is required"}), 400
+    speak = body.get("speak", True)
     try:
-        result = submit_player_action(g.user.id, session_id, text, llm=resolve_gm_llm())
+        result = submit_player_action(
+            g.user.id,
+            session_id,
+            text,
+            llm=resolve_gm_llm(),
+            tts=resolve_tts(),
+            speak=bool(speak),
+        )
+    except (SessionError, ActionError) as exc:
+        return _error(exc)
+    return jsonify({"success": True, **result})
+
+
+@sessions_bp.route("/<session_id>/actions/voice", methods=["POST"])
+@require_user
+def submit_voice(session_id: str):
+    upload = request.files.get("audio") or request.files.get("file")
+    if not upload:
+        return jsonify({"error": "audio file is required"}), 400
+    audio = upload.read()
+    content_type = (upload.mimetype or request.form.get("content_type") or "audio/webm").strip()
+    speak = request.form.get("speak", "true").strip().lower() not in {"0", "false", "no"}
+    try:
+        result = submit_voice_action(
+            g.user.id,
+            session_id,
+            audio=audio,
+            content_type=content_type,
+            stt=resolve_stt(),
+            tts=resolve_tts(),
+            llm=resolve_gm_llm(),
+            speak=speak,
+        )
     except (SessionError, ActionError) as exc:
         return _error(exc)
     return jsonify({"success": True, **result})

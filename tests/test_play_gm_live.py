@@ -99,7 +99,7 @@ def live_table(monkeypatch):
     set_ready(p2.id, gs.id, True)
     start_game_session(host.id, gs.id)
 
-    yield {
+    payload = {
         "Session": Session,
         "host": host,
         "p2": p2,
@@ -108,6 +108,7 @@ def live_table(monkeypatch):
         "campaign": campaign,
     }
     db.close()
+    yield payload
 
 
 def test_resolve_gm_llm_defaults_to_mock(monkeypatch):

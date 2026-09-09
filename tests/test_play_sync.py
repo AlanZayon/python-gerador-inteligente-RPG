@@ -94,7 +94,7 @@ def live_table(monkeypatch):
     set_ready(p2.id, gs.id, True)
     start_game_session(host.id, gs.id)
 
-    yield {
+    payload = {
         "Session": Session,
         "hub": hub,
         "host": host,
@@ -103,6 +103,7 @@ def live_table(monkeypatch):
         "session_id": gs.id,
     }
     db.close()
+    yield payload
 
 
 def test_member_gets_reconnect_snapshot_with_state_and_events(live_table):
