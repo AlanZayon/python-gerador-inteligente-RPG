@@ -51,11 +51,9 @@ class LiveGMLLM:
         *,
         chat_fn: Callable[..., dict] | None = None,
         model: str | None = None,
-        retrieve_fn: Callable[..., list] | None = None,
     ):
         self._chat = chat_fn or chat_completion
         self._model = model
-        self._retrieve_fn = retrieve_fn
         self.last_observability: dict[str, Any] = {}
 
     def complete_turn(self, context: dict) -> LLMTurn:
@@ -75,8 +73,6 @@ class LiveGMLLM:
         return LLMTurn(tool_calls=tool_calls, narration=content)
 
     def narrate_after_tools(self, context: dict, tool_results: list[dict]) -> str:
-        if context.get("pending_narration"):
-            return context["pending_narration"]
         messages = self._build_messages(context)
         messages.append(
             {

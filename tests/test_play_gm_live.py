@@ -163,7 +163,7 @@ def test_live_llm_executes_validated_tool_calls(live_table, monkeypatch):
         ]
     )
     monkeypatch.setattr("services.play.gm.live_llm.chat_completion", fake)
-    llm = LiveGMLLM(retrieve_fn=lambda **kw: [])
+    llm = LiveGMLLM()
     result = submit_player_action(
         live_table["host"].id,
         live_table["session_id"],
@@ -197,7 +197,7 @@ def test_invalid_tool_calls_are_skipped(live_table, monkeypatch):
         ]
     )
     monkeypatch.setattr("services.play.gm.live_llm.chat_completion", fake)
-    llm = LiveGMLLM(retrieve_fn=lambda **kw: [])
+    llm = LiveGMLLM()
     result = submit_player_action(
         live_table["p2"].id,
         live_table["session_id"],
@@ -227,7 +227,7 @@ def test_malformed_tool_arguments_are_tolerated(live_table, monkeypatch):
         ]
     )
     monkeypatch.setattr("services.play.gm.live_llm.chat_completion", fake)
-    llm = LiveGMLLM(retrieve_fn=lambda **kw: [])
+    llm = LiveGMLLM()
     result = submit_player_action(
         live_table["host"].id,
         live_table["session_id"],
