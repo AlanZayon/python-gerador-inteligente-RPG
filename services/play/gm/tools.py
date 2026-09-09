@@ -6,7 +6,7 @@ import json
 import random
 from typing import Any, Callable
 
-from models.entities import CampaignCharacter, GameEvent, GameSession
+from models.entities import CampaignCharacter, GameEvent, GameSession, SessionPlayer
 from services.play.gm.state import dump_state, load_state
 
 DiceRng = Callable[[int], int]
@@ -173,6 +173,18 @@ def _parse_notation(notation: str) -> tuple[int, int, int]:
     return max(1, n), max(2, sides), mod
 
 
+def _character_claimed_in_session(ctx: ToolContext, character_id: str) -> bool:
+    return (
+        ctx.db.query(SessionPlayer)
+        .filter(
+            SessionPlayer.game_session_id == ctx.gs.id,
+            SessionPlayer.character_id == character_id,
+        )
+        .first()
+        is not None
+    )
+
+
 def execute_tool(ctx: ToolContext, name: str, args: dict) -> dict:
     args = args or {}
     if name == "roll_dice":
@@ -241,21 +253,30 @@ def execute_tool(ctx: ToolContext, name: str, args: dict) -> dict:
         else:
             char = (
                 ctx.db.query(CampaignCharacter)
-                .filter(CampaignCharacter.id == character_id)
+                .filter(
+                    CampaignCharacter.id == character_id,
+                    CampaignCharacter.campaign_id == ctx.gs.campaign_id,
+                )
                 .first()
             )
             if not char:
-                out = {"ok": False, "error": "character not found"}
+                out = {"ok": False, "error": "character not found in campaign"}
             else:
-                bucket = ctx.state["characters"].setdefault(character_id, {})
-                bucket.update(fields)
-                ctx.append_event(
-                    "character_updated",
-                    {"character_id": character_id, "fields": fields},
-                    target_id=character_id,
-                )
-                ctx.persist_state()
-                out = {"ok": True, "result": bucket}
+                if not _character_claimed_in_session(ctx, character_id):
+                    out = {
+                        "ok": False,
+                        "error": "character is not claimed in this session",
+                    }
+                else:
+                    bucket = ctx.state["characters"].setdefault(character_id, {})
+                    bucket.update(fields)
+                    ctx.append_event(
+                        "character_updated",
+                        {"character_id": character_id, "fields": fields},
+                        target_id=character_id,
+                    )
+                    ctx.persist_state()
+                    out = {"ok": True, "result": bucket}
     elif name == "update_quest":
         quest_id = args.get("quest_id") or "main"
         fields = args.get("fields") or {}
@@ -272,6 +293,14 @@ def execute_tool(ctx: ToolContext, name: str, args: dict) -> dict:
         char_id = args.get("character_id") or (
             ctx.actor_character_id if scope == "character_private" else None
         )
+        if scope == "character_private" and char_id:
+            if not _character_claimed_in_session(ctx, char_id):
+                out = {
+                    "ok": False,
+                    "error": "character is not claimed in this session",
+                }
+                ctx.tool_results.append({"name": name, "args": args, "result": out})
+                return out
         try:
             mem = write_memory(
                 campaign_id=ctx.gs.campaign_id,

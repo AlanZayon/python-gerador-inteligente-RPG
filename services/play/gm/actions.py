@@ -11,6 +11,7 @@ from models.entities import GameSession, SessionPlayer
 from services.play.gm.errors import ActionError
 from services.play.gm.runtime import run_gm_flight
 from services.play.gm.tools import DiceRng
+from services.rate_limit import check_play_action_rate
 
 _locks: dict[str, threading.Lock] = defaultdict(threading.Lock)
 _queues: dict[str, deque] = defaultdict(deque)
@@ -55,6 +56,9 @@ def submit_player_action(
     action_text = (text or "").strip()
     if not action_text:
         raise ActionError("invalid", "Action text is required")
+
+    if not check_play_action_rate(user_id):
+        raise ActionError("rate_limited", "Too many actions; slow down a moment")
 
     # Membership/character checks run under the session lock only. A pre-lock DB
     # round-trip races on SQLite StaticPool when two threads open SessionLocal.

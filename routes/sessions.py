@@ -33,6 +33,7 @@ def _error(exc: SessionError | ActionError | SyncError):
         "invalid": 400,
         "stt_failed": 502,
         "timeout": 504,
+        "rate_limited": 429,
     }.get(exc.code, 400)
     return jsonify({"error": exc.code, "message": exc.message}), status
 

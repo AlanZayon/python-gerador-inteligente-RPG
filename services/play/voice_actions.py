@@ -7,6 +7,7 @@ from typing import Any
 from services.play.gm.actions import submit_player_action
 from services.play.gm.errors import ActionError
 from services.play.gm.tools import DiceRng
+from services.rate_limit import check_play_voice_rate
 from services.voice import SpeechToTextProvider, TextToSpeechProvider, resolve_stt
 
 
@@ -29,6 +30,9 @@ def submit_voice_action(
     """
     if not audio:
         raise ActionError("invalid", "Audio payload is required")
+
+    if not check_play_voice_rate(user_id):
+        raise ActionError("rate_limited", "Too many voice actions; slow down a moment")
 
     stt_provider = stt or resolve_stt()
     try:

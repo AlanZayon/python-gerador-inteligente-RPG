@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 import json
+import logging
+import uuid
 from typing import Any
 
 from database import SessionLocal
 from models.entities import Campaign, CampaignCharacter, GameSession, SessionPlayer
 from services.play import hub as hub_module
 from services.play.events import event_to_envelope
+from services.play.gm.agency import scrub_unsolicited_pc_actions
 from services.play.gm.errors import ActionError
 from services.play.gm.live_llm import validate_tool_calls
 from services.play.gm.provider import resolve_gm_llm
@@ -20,6 +23,8 @@ from services.play.memory import (
     list_memories_for_gm,
     scrub_table_narration,
 )
+
+logger = logging.getLogger(__name__)
 
 
 def run_gm_flight(
@@ -34,6 +39,7 @@ def run_gm_flight(
     speak: bool = True,
 ) -> dict:
     llm = llm or resolve_gm_llm()
+    request_id = str(uuid.uuid4())
     db = SessionLocal()
     try:
         gs = db.query(GameSession).filter(GameSession.id == session_id).first()
@@ -50,6 +56,22 @@ def run_gm_flight(
             .filter(CampaignCharacter.id == character_id)
             .first()
         )
+        seated = (
+            db.query(SessionPlayer)
+            .filter(SessionPlayer.game_session_id == session_id)
+            .all()
+        )
+        other_names = []
+        for sp in seated:
+            if not sp.character_id or sp.character_id == character_id:
+                continue
+            other = (
+                db.query(CampaignCharacter)
+                .filter(CampaignCharacter.id == sp.character_id)
+                .first()
+            )
+            if other and other.display_name:
+                other_names.append(other.display_name)
         blueprint = {}
         if campaign and campaign.blueprint_json:
             try:
@@ -96,7 +118,15 @@ def run_gm_flight(
         }
         turn = llm.complete_turn(context)
         for call in validate_tool_calls(turn.tool_calls or []):
-            execute_tool(ctx, call["name"], call.get("args") or {})
+            tool_name = call["name"]
+            tool_out = execute_tool(ctx, tool_name, call.get("args") or {})
+            logger.info(
+                "gm_tool request_id=%s session_id=%s tool=%s ok=%s",
+                request_id,
+                session_id,
+                tool_name,
+                bool((tool_out or {}).get("ok")),
+            )
 
         narration = turn.narration
         if not narration and hasattr(llm, "narrate_after_tools"):
@@ -116,6 +146,12 @@ def run_gm_flight(
         private_all = [m for m in memories_gm_after if m.get("scope") == "character_private"]
         # Table-wide narration must not auto-reveal character-private knowledge
         table_narration = scrub_table_narration(narration, private_all)
+        table_narration = scrub_unsolicited_pc_actions(
+            table_narration,
+            actor_name=character.display_name if character else None,
+            other_names=other_names,
+            player_action=player_action,
+        )
 
         observability = getattr(llm, "last_observability", None) or {
             "purpose": "gm_turn",
@@ -123,6 +159,19 @@ def run_gm_flight(
             "model": None,
             "latency_ms": None,
         }
+        observability = {**observability, "request_id": request_id}
+
+        logger.info(
+            "gm_turn request_id=%s session_id=%s actor_user_id=%s provider=%s model=%s "
+            "latency_ms=%s tools=%s",
+            request_id,
+            session_id,
+            user_id,
+            observability.get("provider"),
+            observability.get("model"),
+            observability.get("latency_ms"),
+            len(ctx.tool_results),
+        )
 
         ctx.append_event(
             "gm_narration",
