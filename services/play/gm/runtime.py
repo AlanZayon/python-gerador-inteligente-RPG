@@ -15,6 +15,11 @@ from services.play.gm.provider import resolve_gm_llm
 from services.play.gm.rag_context import retrieve_gm_rules
 from services.play.gm.state import load_state
 from services.play.gm.tools import DiceRng, ToolContext, execute_tool
+from services.play.memory import (
+    filter_memories_for_character,
+    list_memories_for_gm,
+    scrub_table_narration,
+)
 
 
 def run_gm_flight(
@@ -60,6 +65,17 @@ def run_gm_flight(
             character_name=character.display_name if character else "",
             retrieve_fn=retrieve_fn,
         )
+        memories_gm = list_memories_for_gm(
+            campaign_id=gs.campaign_id,
+            game_session_id=session_id,
+            db=db,
+        )
+        memories_player = filter_memories_for_character(
+            campaign_id=gs.campaign_id,
+            game_session_id=session_id,
+            character_id=character_id,
+            db=db,
+        )
         context = {
             "player_action": player_action,
             "actor_user_id": user_id,
@@ -71,6 +87,10 @@ def run_gm_flight(
             "session_status": gs.status,
             "book_id": campaign.book_id if campaign else None,
             "rules_excerpts": rules_excerpts,
+            # GM continuity: all scopes including others' private knowledge
+            "memories_gm": memories_gm,
+            # Player-facing filtered layer (no other Characters' private knowledge)
+            "memories_player": memories_player,
         }
         turn = llm.complete_turn(context)
         for call in validate_tool_calls(turn.tool_calls or []):
@@ -85,6 +105,16 @@ def run_gm_flight(
         if not narration:
             narration = "The moment hangs in the air."
 
+        # Refresh private set after tools may have written new secrets this turn
+        memories_gm_after = list_memories_for_gm(
+            campaign_id=gs.campaign_id,
+            game_session_id=session_id,
+            db=db,
+        )
+        private_all = [m for m in memories_gm_after if m.get("scope") == "character_private"]
+        # Table-wide narration must not auto-reveal character-private knowledge
+        table_narration = scrub_table_narration(narration, private_all)
+
         observability = getattr(llm, "last_observability", None) or {
             "purpose": "gm_turn",
             "provider": type(llm).__name__,
@@ -95,11 +125,18 @@ def run_gm_flight(
         ctx.append_event(
             "gm_narration",
             {
-                "text": narration,
+                "text": table_narration,
                 "player_action": player_action,
                 "observability": {
                     k: observability.get(k)
-                    for k in ("purpose", "provider", "model", "latency_ms", "prompt_tokens", "completion_tokens")
+                    for k in (
+                        "purpose",
+                        "provider",
+                        "model",
+                        "latency_ms",
+                        "prompt_tokens",
+                        "completion_tokens",
+                    )
                 },
             },
         )
@@ -111,13 +148,14 @@ def run_gm_flight(
             hub_module.default_hub.publish(session_id, envelope)
         db.refresh(gs)
         return {
-            "narration": narration,
+            "narration": table_narration,
             "state": load_state(gs.state_json),
             "state_version": gs.state_version,
             "events": ctx.events_out,
             "tool_results": ctx.tool_results,
             "rules_excerpts": rules_excerpts,
             "observability": observability,
+            "memories_player": memories_player,
         }
     except Exception:
         db.rollback()

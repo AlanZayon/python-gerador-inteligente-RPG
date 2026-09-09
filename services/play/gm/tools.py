@@ -52,6 +52,15 @@ TOOL_SPECS = [
         "description": "Update quest/front progress clocks.",
         "parameters": {"quest_id": "string", "fields": "object"},
     },
+    {
+        "name": "write_memory",
+        "description": "Persist session, campaign, or character-private knowledge.",
+        "parameters": {
+            "scope": "session|campaign|character_private",
+            "content": "string",
+            "character_id": "string optional for character_private",
+        },
+    },
 ]
 
 TOOL_NAMES = {spec["name"] for spec in TOOL_SPECS}
@@ -255,6 +264,35 @@ def execute_tool(ctx: ToolContext, name: str, args: dict) -> dict:
         ctx.append_event("quest_updated", {"quest_id": quest_id, "fields": fields})
         ctx.persist_state()
         out = {"ok": True, "result": bucket}
+    elif name == "write_memory":
+        from services.play.memory import MemoryError, write_memory
+
+        scope = args.get("scope") or "session"
+        content = args.get("content") or ""
+        char_id = args.get("character_id") or (
+            ctx.actor_character_id if scope == "character_private" else None
+        )
+        try:
+            mem = write_memory(
+                campaign_id=ctx.gs.campaign_id,
+                game_session_id=ctx.gs.id,
+                scope=scope,
+                content=content,
+                character_id=char_id,
+                db=ctx.db,
+            )
+            ctx.append_event(
+                "memory_written",
+                {
+                    "scope": mem["scope"],
+                    "character_id": mem.get("character_id"),
+                    "memory_id": mem["id"],
+                },
+                target_id=mem.get("character_id"),
+            )
+            out = {"ok": True, "result": mem}
+        except MemoryError as exc:
+            out = {"ok": False, "error": exc.message}
     else:
         out = {"ok": False, "error": f"unknown tool {name}"}
 

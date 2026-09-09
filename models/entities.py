@@ -169,6 +169,22 @@ class GameEvent(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 
+class Memory(Base):
+    __tablename__ = "memories"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    campaign_id: Mapped[str] = mapped_column(String(36), ForeignKey("campaigns.id"), index=True)
+    game_session_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("game_sessions.id"), nullable=True, index=True
+    )
+    scope: Mapped[str] = mapped_column(String(32))  # session | campaign | character_private
+    character_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("campaign_characters.id"), nullable=True, index=True
+    )
+    content_json: Mapped[str] = mapped_column(Text, default="{}")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
 class Subscription(Base):
     __tablename__ = "subscriptions"
 
