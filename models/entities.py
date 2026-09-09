@@ -89,6 +89,43 @@ class CampaignCharacter(Base):
     campaign: Mapped["Campaign"] = relationship(back_populates="characters")
 
 
+class GameSession(Base):
+    __tablename__ = "game_sessions"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    campaign_id: Mapped[str] = mapped_column(String(36), ForeignKey("campaigns.id"), index=True)
+    invite_code: Mapped[str] = mapped_column(String(16), unique=True, index=True)
+    status: Mapped[str] = mapped_column(String(32), default="LOBBY")
+    host_user_id: Mapped[str] = mapped_column(String(36), ForeignKey("users.id"), index=True)
+    state_json: Mapped[str] = mapped_column(Text, default="{}")
+    state_version: Mapped[int] = mapped_column(Integer, default=0)
+    current_scene: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    ended_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+    players: Mapped[list["SessionPlayer"]] = relationship(back_populates="game_session")
+
+
+class SessionPlayer(Base):
+    __tablename__ = "session_players"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    game_session_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("game_sessions.id"), index=True
+    )
+    user_id: Mapped[str] = mapped_column(String(36), ForeignKey("users.id"), index=True)
+    character_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("campaign_characters.id"), nullable=True
+    )
+    role: Mapped[str] = mapped_column(String(32), default="player")
+    ready: Mapped[bool] = mapped_column(Boolean, default=False)
+    connected: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+    game_session: Mapped["GameSession"] = relationship(back_populates="players")
+
+
 class Subscription(Base):
     __tablename__ = "subscriptions"
 
