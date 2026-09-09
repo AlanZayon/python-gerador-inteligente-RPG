@@ -3,7 +3,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text
+from sqlalchemy import Boolean, DateTime, ForeignKey, Index, Integer, String, Text, text as sa_text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from database import Base
@@ -91,6 +91,15 @@ class CampaignCharacter(Base):
 
 class GameSession(Base):
     __tablename__ = "game_sessions"
+    __table_args__ = (
+        Index(
+            "uq_game_sessions_active_campaign",
+            "campaign_id",
+            unique=True,
+            sqlite_where=sa_text("status IN ('LOBBY', 'STARTING', 'ACTIVE', 'PAUSED')"),
+            postgresql_where=sa_text("status IN ('LOBBY', 'STARTING', 'ACTIVE', 'PAUSED')"),
+        ),
+    )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
     campaign_id: Mapped[str] = mapped_column(String(36), ForeignKey("campaigns.id"), index=True)
@@ -109,6 +118,22 @@ class GameSession(Base):
 
 class SessionPlayer(Base):
     __tablename__ = "session_players"
+    __table_args__ = (
+        Index(
+            "uq_session_player_user",
+            "game_session_id",
+            "user_id",
+            unique=True,
+        ),
+        Index(
+            "uq_session_player_character",
+            "game_session_id",
+            "character_id",
+            unique=True,
+            sqlite_where=sa_text("character_id IS NOT NULL"),
+            postgresql_where=sa_text("character_id IS NOT NULL"),
+        ),
+    )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
     game_session_id: Mapped[str] = mapped_column(

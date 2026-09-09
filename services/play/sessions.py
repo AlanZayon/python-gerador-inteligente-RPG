@@ -8,6 +8,7 @@ from datetime import datetime
 
 from database import SessionLocal
 from models.entities import Campaign, CampaignCharacter, GameSession, SessionPlayer
+from sqlalchemy.exc import IntegrityError
 
 MIN_PLAYERS = 2
 MAX_PLAYERS = 4
@@ -78,7 +79,11 @@ def create_game_session(user_id: str, campaign_id: str) -> GameSession:
                 connected=True,
             )
         )
-        db.commit()
+        try:
+            db.commit()
+        except IntegrityError as exc:
+            db.rollback()
+            raise SessionError("session_exists", "Campaign already has an active GameSession") from exc
         db.refresh(gs)
         return gs
     except SessionError:
@@ -114,7 +119,14 @@ def join_game_session(user_id: str, invite_code: str) -> SessionPlayer:
             connected=True,
         )
         db.add(sp)
-        db.commit()
+        try:
+            db.commit()
+        except IntegrityError as exc:
+            db.rollback()
+            existing = _get_membership(db, gs.id, user_id)
+            if existing:
+                return existing
+            raise SessionError("full", "GameSession is full (max 4 players)") from exc
         db.refresh(sp)
         return sp
     except SessionError:
@@ -162,7 +174,11 @@ def claim_character(user_id: str, session_id: str, character_id: str) -> Session
 
         membership.character_id = character_id
         membership.ready = False
-        db.commit()
+        try:
+            db.commit()
+        except IntegrityError as exc:
+            db.rollback()
+            raise SessionError("character_taken", "Character already claimed") from exc
         db.refresh(membership)
         return membership
     except SessionError:

@@ -35,6 +35,8 @@ def test_alembic_upgrade_head_creates_core_tables(tmp_path):
         assert "stripe_events" in tables
         assert "campaigns" in tables
         assert "campaign_characters" in tables
+        assert "game_sessions" in tables
+        assert "session_players" in tables
 
         job_cols = {c["name"] for c in inspect(engine).get_columns("jobs")}
         assert "use_character_sheets" in job_cols
@@ -56,7 +58,9 @@ def test_run_migrations_stamps_legacy_schema_without_alembic_version(tmp_path):
     engine = create_engine(url)
     Base.metadata.create_all(bind=engine)
     with engine.begin() as conn:
-        # Simulate schema as of baseline only (no blueprint_json / book_id / campaigns)
+        # Simulate schema as of baseline only (no blueprint_json / book_id / campaigns / sessions)
+        conn.exec_driver_sql("DROP TABLE IF EXISTS session_players")
+        conn.exec_driver_sql("DROP TABLE IF EXISTS game_sessions")
         conn.exec_driver_sql("DROP TABLE IF EXISTS campaign_characters")
         conn.exec_driver_sql("DROP TABLE IF EXISTS campaigns")
         cols = {c["name"] for c in inspect(engine).get_columns("jobs")}
@@ -99,6 +103,7 @@ def test_run_migrations_stamps_legacy_schema_without_alembic_version(tmp_path):
         assert "users" in tables
         assert "campaigns" in tables
         assert "campaign_characters" in tables
+        assert "game_sessions" in tables
         job_cols = {c["name"] for c in inspect(engine).get_columns("jobs")}
         assert "blueprint_json" in job_cols
         assert "book_id" in job_cols
