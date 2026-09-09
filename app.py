@@ -44,6 +44,7 @@ from routes.dashboard import dashboard_bp
 from routes.rag import rag_bp
 from routes.campaigns import campaigns_bp
 from routes.sessions import sessions_bp
+from routes.ws_sessions import register_session_sockets
 
 load_dotenv()
 validate_production_auth_config()
@@ -75,6 +76,7 @@ app.register_blueprint(dashboard_bp)
 app.register_blueprint(campaigns_bp)
 app.register_blueprint(sessions_bp)
 app.register_blueprint(rag_bp, url_prefix="/rag")
+register_session_sockets(app)
 
 UPLOAD_FOLDER = 'uploads/'
 CAMPAIGN_FOLDER = 'campaigns/'

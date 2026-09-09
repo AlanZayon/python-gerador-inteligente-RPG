@@ -72,6 +72,7 @@ class ToolContext:
         self.state = load_state(gs.state_json)
         self.tool_results: list[dict[str, Any]] = []
         self.events_out: list[dict[str, Any]] = []
+        self._pending_publish: list[GameEvent] = []
 
     def _next_seq(self) -> int:
         last = (
@@ -105,6 +106,7 @@ class ToolContext:
             "payload": payload,
         }
         self.events_out.append(out)
+        self._pending_publish.append(ev)
         return ev
 
     def persist_state(self, bump_version: bool = False) -> None:

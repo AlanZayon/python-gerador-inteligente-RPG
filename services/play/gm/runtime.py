@@ -7,6 +7,8 @@ from typing import Any
 
 from database import SessionLocal
 from models.entities import Campaign, CampaignCharacter, GameSession, SessionPlayer
+from services.play.events import event_to_envelope
+from services.play import hub as hub_module
 from services.play.gm.errors import ActionError
 from services.play.gm.mock_llm import MockGMLLM
 from services.play.gm.state import load_state
@@ -75,7 +77,10 @@ def run_gm_flight(
         )
         ctx.persist_state(bump_version=True)
 
+        envelopes = [event_to_envelope(ev) for ev in ctx._pending_publish]
         db.commit()
+        for envelope in envelopes:
+            hub_module.default_hub.publish(session_id, envelope)
         db.refresh(gs)
         return {
             "narration": narration,

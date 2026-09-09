@@ -15,11 +15,12 @@ from services.play.sessions import (
     start_game_session,
 )
 from services.play.gm import ActionError, MockGMLLM, submit_player_action
+from services.play.sync import SyncError, get_reconnect_snapshot
 
 sessions_bp = Blueprint("sessions", __name__, url_prefix="/sessions")
 
 
-def _error(exc: SessionError | ActionError):
+def _error(exc: SessionError | ActionError | SyncError):
     status = {
         "not_found": 404,
         "forbidden": 403,
@@ -118,6 +119,21 @@ def end(session_id: str):
     except SessionError as exc:
         return _error(exc)
     return jsonify({"success": True, "session": session_to_dict(gs)})
+
+
+@sessions_bp.route("/<session_id>/snapshot", methods=["GET"])
+@require_user
+def snapshot(session_id: str):
+    after_seq = request.args.get("after_seq", 0)
+    try:
+        after = int(after_seq)
+    except (TypeError, ValueError):
+        after = 0
+    try:
+        data = get_reconnect_snapshot(g.user.id, session_id, after_seq=after)
+    except SyncError as exc:
+        return _error(exc)
+    return jsonify({"snapshot": data})
 
 
 @sessions_bp.route("/<session_id>/actions", methods=["POST"])

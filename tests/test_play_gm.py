@@ -35,6 +35,11 @@ def live_table(monkeypatch):
     monkeypatch.setattr("services.play.gm.runtime.SessionLocal", Session)
     monkeypatch.setattr("services.play.gm.actions.SessionLocal", Session)
 
+    import services.play.gm.actions as actions_mod
+
+    actions_mod._locks.clear()
+    actions_mod._queues.clear()
+
     db = Session()
     host = User(clerk_id="host", email="host@ex.com")
     p2 = User(clerk_id="p2", email="p2@ex.com")

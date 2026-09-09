@@ -8,6 +8,8 @@ from datetime import datetime
 
 from database import SessionLocal
 from models.entities import Campaign, CampaignCharacter, GameSession, SessionPlayer
+from services.play.events import event_to_envelope, record_event
+from services.play import hub as hub_module
 from sqlalchemy.exc import IntegrityError
 
 MIN_PLAYERS = 2
@@ -79,11 +81,20 @@ def create_game_session(user_id: str, campaign_id: str) -> GameSession:
                 connected=True,
             )
         )
+        ev = record_event(
+            db,
+            session_id=gs.id,
+            event_type="session_created",
+            payload={"invite_code": code, "host_user_id": user_id},
+            actor_id=user_id,
+        )
+        envelope = event_to_envelope(ev)
         try:
             db.commit()
         except IntegrityError as exc:
             db.rollback()
             raise SessionError("session_exists", "Campaign already has an active GameSession") from exc
+        hub_module.default_hub.publish(envelope["session_id"], envelope)
         db.refresh(gs)
         return gs
     except SessionError:
@@ -119,6 +130,14 @@ def join_game_session(user_id: str, invite_code: str) -> SessionPlayer:
             connected=True,
         )
         db.add(sp)
+        ev = record_event(
+            db,
+            session_id=gs.id,
+            event_type="player_joined",
+            payload={"user_id": user_id},
+            actor_id=user_id,
+        )
+        envelope = event_to_envelope(ev)
         try:
             db.commit()
         except IntegrityError as exc:
@@ -127,6 +146,7 @@ def join_game_session(user_id: str, invite_code: str) -> SessionPlayer:
             if existing:
                 return existing
             raise SessionError("full", "GameSession is full (max 4 players)") from exc
+        hub_module.default_hub.publish(envelope["session_id"], envelope)
         db.refresh(sp)
         return sp
     except SessionError:
@@ -174,11 +194,21 @@ def claim_character(user_id: str, session_id: str, character_id: str) -> Session
 
         membership.character_id = character_id
         membership.ready = False
+        ev = record_event(
+            db,
+            session_id=session_id,
+            event_type="character_claimed",
+            payload={"user_id": user_id, "character_id": character_id},
+            actor_id=user_id,
+            target_id=character_id,
+        )
+        envelope = event_to_envelope(ev)
         try:
             db.commit()
         except IntegrityError as exc:
             db.rollback()
             raise SessionError("character_taken", "Character already claimed") from exc
+        hub_module.default_hub.publish(envelope["session_id"], envelope)
         db.refresh(membership)
         return membership
     except SessionError:
@@ -203,7 +233,16 @@ def set_ready(user_id: str, session_id: str, ready: bool = True) -> SessionPlaye
         if ready and not membership.character_id:
             raise SessionError("not_ready", "Claim a Character before ready")
         membership.ready = bool(ready)
+        ev = record_event(
+            db,
+            session_id=session_id,
+            event_type="player_ready",
+            payload={"user_id": user_id, "ready": bool(ready)},
+            actor_id=user_id,
+        )
+        envelope = event_to_envelope(ev)
         db.commit()
+        hub_module.default_hub.publish(envelope["session_id"], envelope)
         db.refresh(membership)
         return membership
     except SessionError:
@@ -245,7 +284,16 @@ def start_game_session(user_id: str, session_id: str) -> GameSession:
 
         gs.status = "ACTIVE"
         gs.started_at = datetime.utcnow()
+        ev = record_event(
+            db,
+            session_id=session_id,
+            event_type="session_started",
+            payload={"player_count": len(players)},
+            actor_id=user_id,
+        )
+        envelope = event_to_envelope(ev)
         db.commit()
+        hub_module.default_hub.publish(envelope["session_id"], envelope)
         db.refresh(gs)
         return gs
     except SessionError:
@@ -270,7 +318,16 @@ def end_game_session(user_id: str, session_id: str) -> GameSession:
             return gs
         gs.status = "ENDED"
         gs.ended_at = datetime.utcnow()
+        ev = record_event(
+            db,
+            session_id=session_id,
+            event_type="session_ended",
+            payload={},
+            actor_id=user_id,
+        )
+        envelope = event_to_envelope(ev)
         db.commit()
+        hub_module.default_hub.publish(envelope["session_id"], envelope)
         db.refresh(gs)
         return gs
     except SessionError:
