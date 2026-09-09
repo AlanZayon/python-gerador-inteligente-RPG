@@ -41,7 +41,8 @@ logs/
 .DS_Store
 Thumbs.db
 
-models/
+# Local LLM weights only — domain ORM under models/*.py is tracked
+models/*.gguf
 *.gguf
 *.pdf
 arcane_forge.db

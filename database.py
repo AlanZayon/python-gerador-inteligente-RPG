@@ -1,8 +1,9 @@
-"""SQLAlchemy database setup."""
+"""SQLAlchemy database setup and Alembic-backed init."""
 
 import os
+from pathlib import Path
 
-from sqlalchemy import create_engine, text
+from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.orm import DeclarativeBase, sessionmaker
 
 
@@ -44,24 +45,43 @@ def check_database_connection() -> bool:
         return False
 
 
-def _migrate_jobs_columns():
-    """Add character-sheet columns to existing jobs tables (idempotent)."""
-    columns = [
-        ("use_character_sheets", "BOOLEAN DEFAULT 0"),
-        ("party_size", "INTEGER DEFAULT 0"),
-        ("character_sheets", "TEXT"),
-    ]
-    with engine.connect() as conn:
-        for name, col_type in columns:
-            try:
-                conn.execute(text(f"ALTER TABLE jobs ADD COLUMN {name} {col_type}"))
-                conn.commit()
-            except Exception:
-                conn.rollback()
+def _alembic_config(url: str | None = None):
+    from alembic.config import Config
+
+    root = Path(__file__).resolve().parent
+    cfg = Config(str(root / "alembic.ini"))
+    cfg.set_main_option("script_location", str(root / "alembic"))
+    cfg.set_main_option("sqlalchemy.url", url or DATABASE_URL)
+    return cfg
+
+
+def run_migrations(url: str | None = None) -> None:
+    """Apply Alembic migrations to head.
+
+    If the database already has the legacy schema (created via create_all)
+    but no alembic_version row, stamp to head instead of recreating tables.
+    """
+    from alembic import command
+
+    target_url = url or DATABASE_URL
+    cfg = _alembic_config(target_url)
+
+    target_engine = create_engine(
+        target_url,
+        connect_args={"check_same_thread": False} if target_url.startswith("sqlite") else {},
+    )
+    try:
+        tables = set(inspect(target_engine).get_table_names())
+        if "users" in tables and "alembic_version" not in tables:
+            command.stamp(cfg, "head")
+            return
+        command.upgrade(cfg, "head")
+    finally:
+        target_engine.dispose()
 
 
 def init_db():
-    from models import entities  # noqa: F401
+    """Ensure schema is at Alembic head. Prefer migrations over create_all."""
+    import models.entities  # noqa: F401
 
-    Base.metadata.create_all(bind=engine)
-    _migrate_jobs_columns()
+    run_migrations()
