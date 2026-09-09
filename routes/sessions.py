@@ -14,11 +14,12 @@ from services.play.sessions import (
     set_ready,
     start_game_session,
 )
+from services.play.gm import ActionError, MockGMLLM, submit_player_action
 
 sessions_bp = Blueprint("sessions", __name__, url_prefix="/sessions")
 
 
-def _error(exc: SessionError):
+def _error(exc: SessionError | ActionError):
     status = {
         "not_found": 404,
         "forbidden": 403,
@@ -26,6 +27,7 @@ def _error(exc: SessionError):
         "session_exists": 409,
         "character_taken": 409,
         "not_ready": 400,
+        "invalid": 400,
     }.get(exc.code, 400)
     return jsonify({"error": exc.code, "message": exc.message}), status
 
@@ -116,3 +118,17 @@ def end(session_id: str):
     except SessionError as exc:
         return _error(exc)
     return jsonify({"success": True, "session": session_to_dict(gs)})
+
+
+@sessions_bp.route("/<session_id>/actions", methods=["POST"])
+@require_user
+def submit_action(session_id: str):
+    body = request.get_json(silent=True) or {}
+    text = (body.get("text") or "").strip()
+    if not text:
+        return jsonify({"error": "text is required"}), 400
+    try:
+        result = submit_player_action(g.user.id, session_id, text, llm=MockGMLLM())
+    except (SessionError, ActionError) as exc:
+        return _error(exc)
+    return jsonify({"success": True, **result})

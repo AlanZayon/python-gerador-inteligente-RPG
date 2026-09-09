@@ -37,6 +37,7 @@ def test_alembic_upgrade_head_creates_core_tables(tmp_path):
         assert "campaign_characters" in tables
         assert "game_sessions" in tables
         assert "session_players" in tables
+        assert "game_events" in tables
 
         job_cols = {c["name"] for c in inspect(engine).get_columns("jobs")}
         assert "use_character_sheets" in job_cols
@@ -59,6 +60,7 @@ def test_run_migrations_stamps_legacy_schema_without_alembic_version(tmp_path):
     Base.metadata.create_all(bind=engine)
     with engine.begin() as conn:
         # Simulate schema as of baseline only (no blueprint_json / book_id / campaigns / sessions)
+        conn.exec_driver_sql("DROP TABLE IF EXISTS game_events")
         conn.exec_driver_sql("DROP TABLE IF EXISTS session_players")
         conn.exec_driver_sql("DROP TABLE IF EXISTS game_sessions")
         conn.exec_driver_sql("DROP TABLE IF EXISTS campaign_characters")

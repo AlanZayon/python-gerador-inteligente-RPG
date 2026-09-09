@@ -151,6 +151,24 @@ class SessionPlayer(Base):
     game_session: Mapped["GameSession"] = relationship(back_populates="players")
 
 
+class GameEvent(Base):
+    __tablename__ = "game_events"
+    __table_args__ = (
+        Index("uq_game_event_seq", "game_session_id", "seq", unique=True),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    game_session_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("game_sessions.id"), index=True
+    )
+    seq: Mapped[int] = mapped_column(Integer)
+    type: Mapped[str] = mapped_column(String(64))
+    actor_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    target_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    payload_json: Mapped[str] = mapped_column(Text, default="{}")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
 class Subscription(Base):
     __tablename__ = "subscriptions"
 
