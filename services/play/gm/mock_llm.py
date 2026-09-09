@@ -25,7 +25,7 @@ class MockGMLLM:
         if lower.startswith("gm_script:"):
             return self._scripted(action, character_id)
 
-        if "roll" in lower or "d20" in lower or "check" in lower:
+        if "roll" in lower or "d20" in lower:
             notation = "1d20"
             m = re.search(r"(\d*)d(\d+)", lower)
             if m:
@@ -37,7 +37,22 @@ class MockGMLLM:
                         "args": {"notation": notation, "reason": action},
                     }
                 ],
-                narration="",  # filled after tools with authoritative total
+                narration="",
+            )
+
+        if "check" in lower:
+            skill = "Athletics"
+            m = re.search(r"for ([A-Za-z]+)", action, re.I)
+            if m:
+                skill = m.group(1)
+            return LLMTurn(
+                tool_calls=[
+                    {
+                        "name": "perform_check",
+                        "args": {"skill": skill, "modifier": 0},
+                    }
+                ],
+                narration="",
             )
 
         location = state.get("location") or "the scene"

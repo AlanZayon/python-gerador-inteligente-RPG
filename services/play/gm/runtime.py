@@ -7,6 +7,7 @@ from typing import Any
 
 from database import SessionLocal
 from models.entities import Campaign, CampaignCharacter, GameSession, SessionPlayer
+from services.play.gm.errors import ActionError
 from services.play.gm.mock_llm import MockGMLLM
 from services.play.gm.state import load_state
 from services.play.gm.tools import DiceRng, ToolContext, execute_tool
@@ -25,7 +26,7 @@ def run_gm_flight(
     try:
         gs = db.query(GameSession).filter(GameSession.id == session_id).first()
         if not gs:
-            raise RuntimeError("session missing")
+            raise ActionError("not_found", "GameSession not found")
         campaign = db.query(Campaign).filter(Campaign.id == gs.campaign_id).first()
         membership = (
             db.query(SessionPlayer)

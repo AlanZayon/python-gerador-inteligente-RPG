@@ -196,3 +196,43 @@ def test_update_world_and_character_tools_persist(live_table):
     assert result["state"]["location"] == "Harbor"
     char_id = live_table["chars"][0].id
     assert result["state"]["characters"][char_id]["hp"] == 7
+
+
+def test_perform_check_and_npc_clock_surface(live_table):
+    result = submit_player_action(
+        live_table["p2"].id,
+        live_table["session_id"],
+        "I make a check for Stealth",
+        llm=MockGMLLM(),
+        dice_rng=lambda sides: 12,
+    )
+    assert any(t["name"] == "perform_check" for t in result["tool_results"])
+    assert result["state"]["last_dice"]["total"] == 12
+
+    result2 = submit_player_action(
+        live_table["host"].id,
+        live_table["session_id"],
+        "GM_SCRIPT: move to Wharf",
+        llm=MockGMLLM(),
+    )
+    # exercise npc_flags/clocks via direct tool path through a second scripted update
+    from services.play.gm.tools import ToolContext, execute_tool
+    from models.entities import GameSession
+
+    db = live_table["Session"]()
+    gs = db.query(GameSession).filter(GameSession.id == live_table["session_id"]).first()
+    ctx = ToolContext(db, gs, live_table["host"].id, live_table["chars"][0].id)
+    execute_tool(
+        ctx,
+        "update_world_state",
+        {"patch": {"npc_flags": {"dockmaster": "wary"}, "clocks": {"storm": 2}}},
+    )
+    execute_tool(ctx, "update_quest", {"quest_id": "main", "fields": {"progress": 1}})
+    ctx.persist_state(bump_version=True)
+    db.commit()
+    state = json.loads(gs.state_json)
+    assert state["npc_flags"]["dockmaster"] == "wary"
+    assert state["clocks"]["storm"] == 2
+    assert state["quests"]["main"]["progress"] == 1
+    assert result2["state"]["location"] == "Wharf"
+    db.close()
