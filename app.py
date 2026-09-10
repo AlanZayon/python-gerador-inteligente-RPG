@@ -577,4 +577,10 @@ def detect_system():
 
 if __name__ == '__main__':
     logger.info("Arcane Forge API started")
-    app.run(host='0.0.0.0', port=int(os.getenv('PORT', 5000)), debug=False)
+    # threaded=True so a long GM/9router turn does not freeze /status and other sessions.
+    app.run(
+        host='0.0.0.0',
+        port=int(os.getenv('PORT', 5000)),
+        debug=False,
+        threaded=True,
+    )

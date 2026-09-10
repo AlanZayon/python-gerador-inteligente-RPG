@@ -11,6 +11,9 @@ from models.entities import Campaign, CampaignCharacter, Job
 
 logger = logging.getLogger(__name__)
 
+# Keep in sync with services.play.sessions.MAX_PLAYERS — table seats need claimable PCs.
+MIN_CLAIMABLE_ROSTER = 4
+
 
 class CampaignCreateError(Exception):
     def __init__(self, code: str, message: str):
@@ -29,6 +32,40 @@ def _parse_sheets(raw: str | None) -> list[dict[str, Any]]:
     if isinstance(data, list):
         return [s for s in data if isinstance(s, dict)]
     return []
+
+
+def ensure_claimable_roster(db, campaign_id: str, minimum: int = MIN_CLAIMABLE_ROSTER) -> int:
+    """Pad Campaign with generic claimable PCs so 2–4 players can sit.
+
+    Returns how many characters were added.
+    """
+    existing = (
+        db.query(CampaignCharacter)
+        .filter(CampaignCharacter.campaign_id == campaign_id)
+        .order_by(CampaignCharacter.sort_order)
+        .all()
+    )
+    added = 0
+    next_order = (existing[-1].sort_order + 1) if existing else 0
+    while len(existing) + added < minimum:
+        idx = len(existing) + added + 1
+        db.add(
+            CampaignCharacter(
+                campaign_id=campaign_id,
+                display_name=f"Adventurer {idx}",
+                sheet_json=json.dumps(
+                    {"name": f"Adventurer {idx}", "class": "Adventurer", "level": 1},
+                    ensure_ascii=False,
+                ),
+                sort_order=next_order,
+                claimable=True,
+            )
+        )
+        next_order += 1
+        added += 1
+    if added:
+        db.flush()
+    return added
 
 
 def _title_from_blueprint(blueprint: dict[str, Any], fallback: str = "Untitled Campaign") -> str:
@@ -61,6 +98,9 @@ def create_campaign_from_job(user_id: str, job_id: str) -> Campaign:
             .first()
         )
         if existing:
+            ensure_claimable_roster(db, existing.id)
+            db.commit()
+            db.refresh(existing)
             return existing
 
         try:
@@ -94,6 +134,7 @@ def create_campaign_from_job(user_id: str, job_id: str) -> Campaign:
                 )
             )
 
+        ensure_claimable_roster(db, campaign.id)
         db.commit()
         db.refresh(campaign)
         logger.info("Created Campaign %s from Job %s", campaign.id, job_id)
@@ -134,6 +175,9 @@ def list_characters(campaign_id: str) -> list[CampaignCharacter]:
 
 
 def campaign_to_dict(campaign: Campaign) -> dict[str, Any]:
+    from models.entities import GameSession
+    from services.play.sessions import ACTIVE_STATUSES
+
     payload: dict[str, Any] = {
         "id": campaign.id,
         "job_id": campaign.job_id,
@@ -160,4 +204,27 @@ def campaign_to_dict(campaign: Campaign) -> dict[str, Any]:
         }
         for c in chars
     ]
+
+    db = SessionLocal()
+    try:
+        gs = (
+            db.query(GameSession)
+            .filter(
+                GameSession.campaign_id == campaign.id,
+                GameSession.status.in_(ACTIVE_STATUSES),
+            )
+            .order_by(GameSession.created_at.desc())
+            .first()
+        )
+        payload["active_session"] = (
+            {
+                "id": gs.id,
+                "invite_code": gs.invite_code,
+                "status": gs.status,
+            }
+            if gs
+            else None
+        )
+    finally:
+        db.close()
     return payload

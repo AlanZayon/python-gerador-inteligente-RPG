@@ -1,6 +1,6 @@
 """GameSession HTTP routes."""
 
-from flask import Blueprint, g, jsonify, request
+from flask import Blueprint, current_app, g, jsonify, request
 
 from services.auth import require_user
 from services.play.sessions import (
@@ -15,6 +15,7 @@ from services.play.sessions import (
     start_game_session,
 )
 from services.play.gm import ActionError, resolve_gm_llm, submit_player_action
+from services.play.gm.opening import deliver_session_opening
 from services.play.sync import SyncError, get_reconnect_snapshot
 from services.play.voice_actions import submit_voice_action
 from services.voice import resolve_stt, resolve_tts
@@ -112,7 +113,33 @@ def start(session_id: str):
         gs = get_session_for_user(g.user.id, session_id)
     except SessionError as exc:
         return _error(exc)
-    return jsonify({"success": True, "session": session_to_dict(gs)})
+
+    opening_text = None
+    try:
+        import json as _json
+
+        from database import SessionLocal
+        from models.entities import GameEvent
+
+        db = SessionLocal()
+        try:
+            ev = (
+                db.query(GameEvent)
+                .filter(
+                    GameEvent.game_session_id == session_id,
+                    GameEvent.type == "gm_narration",
+                )
+                .order_by(GameEvent.seq.desc())
+                .first()
+            )
+            if ev:
+                payload = _json.loads(ev.payload_json or "{}")
+                opening_text = payload.get("text")
+        finally:
+            db.close()
+    except Exception:
+        opening_text = None
+    return jsonify({"success": True, "session": session_to_dict(gs), "opening": opening_text})
 
 
 @sessions_bp.route("/<session_id>/end", methods=["POST"])
@@ -148,7 +175,7 @@ def submit_action(session_id: str):
     text = (body.get("text") or "").strip()
     if not text:
         return jsonify({"error": "text is required"}), 400
-    speak = body.get("speak", True)
+    speak = body.get("speak", False)
     try:
         result = submit_player_action(
             g.user.id,

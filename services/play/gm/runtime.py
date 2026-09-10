@@ -27,6 +27,31 @@ from services.play.memory import (
 logger = logging.getLogger(__name__)
 
 
+def _needs_table_narration(text: str, has_tools: bool) -> bool:
+    """True when the model returned planning fluff instead of table narration."""
+    raw = (text or "").strip()
+    if not raw:
+        return True
+    if has_tools and len(raw) < 80:
+        return True
+    lower = raw.lower()
+    meta_prefixes = (
+        "i'll ",
+        "i will ",
+        "let me ",
+        "okay",
+        "i am ",
+        "i'm ",
+        "i'm reading",
+        "i am reading",
+        "reading the campaign",
+        "preparing the scene",
+        "checking the",
+        "looking at the state",
+    )
+    return any(lower.startswith(p) or p in lower[:80] for p in meta_prefixes)
+
+
 def run_gm_flight(
     session_id: str,
     user_id: str,
@@ -116,10 +141,34 @@ def run_gm_flight(
             # Player-facing filtered layer (no other Characters' private knowledge)
             "memories_player": memories_player,
         }
-        turn = llm.complete_turn(context)
+        try:
+            turn = llm.complete_turn(context)
+        except Exception as exc:  # noqa: BLE001
+            logger.exception(
+                "gm_llm_failed request_id=%s session_id=%s err=%s",
+                request_id,
+                session_id,
+                exc,
+            )
+            from services.play.gm.mock_llm import LLMTurn
+
+            turn = LLMTurn(
+                tool_calls=[],
+                narration=(
+                    "The weave flickers and the Game Master loses the thread for a moment. "
+                    "Describe your action again when you are ready."
+                ),
+            )
         for call in validate_tool_calls(turn.tool_calls or []):
             tool_name = call["name"]
-            tool_out = execute_tool(ctx, tool_name, call.get("args") or {})
+            try:
+                tool_out = execute_tool(ctx, call["name"], call.get("args") or {})
+            except Exception as exc:  # noqa: BLE001
+                logger.exception("gm_tool_failed tool=%s session_id=%s", tool_name, session_id)
+                tool_out = {"ok": False, "error": str(exc)[:200]}
+                ctx.tool_results.append(
+                    {"name": tool_name, "args": call.get("args") or {}, "result": tool_out}
+                )
             logger.info(
                 "gm_tool request_id=%s session_id=%s tool=%s ok=%s",
                 request_id,
@@ -128,12 +177,16 @@ def run_gm_flight(
                 bool((tool_out or {}).get("ok")),
             )
 
-        narration = turn.narration
-        if not narration and hasattr(llm, "narrate_after_tools"):
-            narration = llm.narrate_after_tools(
+        narration = (turn.narration or "").strip()
+        if _needs_table_narration(narration, bool(ctx.tool_results)) and hasattr(
+            llm, "narrate_after_tools"
+        ):
+            follow = llm.narrate_after_tools(
                 {**context, "pending_narration": turn.narration},
                 ctx.tool_results,
             )
+            if follow and len(follow.strip()) >= len(narration):
+                narration = follow.strip()
         if not narration:
             narration = "The moment hangs in the air."
 

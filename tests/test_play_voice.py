@@ -21,7 +21,14 @@ from services.play.sessions import (
     start_game_session,
 )
 from services.play.voice_actions import submit_voice_action
-from services.voice import MockSpeechToText, MockTextToSpeech, resolve_stt, resolve_tts
+from services.voice import (
+    MockSpeechToText,
+    MockTextToSpeech,
+    NineRouterSpeechToText,
+    NineRouterTextToSpeech,
+    resolve_stt,
+    resolve_tts,
+)
 
 
 @pytest.fixture
@@ -37,10 +44,18 @@ def live_table(monkeypatch):
         "services.play.sessions.SessionLocal",
         "services.play.gm.runtime.SessionLocal",
         "services.play.gm.actions.SessionLocal",
+        "services.play.gm.opening.SessionLocal",
         "services.play.memory.SessionLocal",
     ):
         monkeypatch.setattr(path, Session)
     monkeypatch.setattr("services.play.gm.runtime.retrieve_gm_rules", lambda **kwargs: [])
+    monkeypatch.setattr(
+        "services.play.gm.opening.resolve_gm_llm",
+        lambda: MockGMLLM(),
+    )
+    monkeypatch.setenv("RATE_LIMIT_BACKEND", "memory")
+    monkeypatch.setenv("VOICE_TTS_PROVIDER", "mock")
+    monkeypatch.setenv("VOICE_STT_PROVIDER", "mock")
 
     import services.play.gm.actions as actions_mod
 
@@ -117,8 +132,26 @@ def test_resolve_voice_defaults_to_mock_when_unset(monkeypatch):
     monkeypatch.delenv("VOICE_STT_PROVIDER", raising=False)
     monkeypatch.delenv("VOICE_TTS_PROVIDER", raising=False)
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.delenv("NINEROUTER_KEY", raising=False)
     assert isinstance(resolve_stt(), MockSpeechToText)
     assert isinstance(resolve_tts(), MockTextToSpeech)
+
+
+def test_resolve_voice_uses_9router_when_configured(monkeypatch):
+    monkeypatch.setenv("VOICE_STT_PROVIDER", "9router")
+    monkeypatch.setenv("VOICE_TTS_PROVIDER", "9router")
+    monkeypatch.setenv("NINEROUTER_URL", "http://localhost:20128/v1")
+    monkeypatch.setenv("NINEROUTER_KEY", "sk-test-abcdefghijklmnop")
+    monkeypatch.setenv("VOICE_STT_MODEL", "gemini/gemini-2.5-flash")
+    monkeypatch.setenv("VOICE_TTS_MODEL", "gemini/gemini-2.5-flash-preview-tts")
+    stt = resolve_stt()
+    tts = resolve_tts()
+    assert isinstance(stt, NineRouterSpeechToText)
+    assert isinstance(tts, NineRouterTextToSpeech)
+    assert stt.base_url == "http://localhost:20128"
+    assert tts.base_url == "http://localhost:20128"
+    assert stt.model == "gemini/gemini-2.5-flash"
+    assert tts.model == "gemini/gemini-2.5-flash-preview-tts"
 
 
 def test_stt_action_uses_connection_identity_not_transcript(live_table):
@@ -156,8 +189,8 @@ def test_voice_and_text_share_fifo_gm_path(live_table):
         "I watch the door.",
         llm=MockGMLLM(),
     )
-    assert voice_result["state_version"] == 1
-    assert text_result["state_version"] == 2
+    assert voice_result["state_version"] == 2  # 1 = session opening, 2 = voice turn
+    assert text_result["state_version"] == 3
 
 
 def test_tts_broadcast_to_session_members(live_table):

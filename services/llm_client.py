@@ -85,11 +85,17 @@ def is_gemini_configured() -> bool:
     return is_configured()
 
 
-def _timeout() -> int:
+def _timeout(purpose: str | None = None) -> int:
+    purpose = (purpose or "").lower()
+    if purpose.startswith("gm") or purpose in {"session_opening", "gm_turn", "gm_narration"}:
+        return int(os.getenv("GM_LLM_TIMEOUT") or "90")
     return int(os.getenv("LLM_TIMEOUT") or os.getenv("LLAMA_TIMEOUT") or "600")
 
 
-def _retry_attempts() -> int:
+def _retry_attempts(purpose: str | None = None) -> int:
+    purpose = (purpose or "").lower()
+    if purpose.startswith("gm") or purpose in {"session_opening", "gm_turn", "gm_narration"}:
+        return int(os.getenv("GM_LLM_RETRY_ATTEMPTS") or "1")
     return int(os.getenv("LLM_RETRY_ATTEMPTS") or os.getenv("GEMINI_RETRY_ATTEMPTS") or "3")
 
 
@@ -184,11 +190,13 @@ def chat_completion(
         body["tool_choice"] = "auto"
 
     last_error: Exception | None = None
-    attempts = max(1, _retry_attempts())
+    attempts = max(1, _retry_attempts(purpose))
     started = time.perf_counter()
     for attempt in range(1, attempts + 1):
         try:
-            response = requests.post(url, json=body, headers=headers, timeout=_timeout())
+            response = requests.post(
+                url, json=body, headers=headers, timeout=_timeout(purpose)
+            )
             if response.status_code in {401, 403}:
                 raise LLMUnavailable("9router rejected the API key")
             if response.status_code == 503:

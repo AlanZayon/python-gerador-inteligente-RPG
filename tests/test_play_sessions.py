@@ -27,6 +27,11 @@ def db_setup(monkeypatch):
     Session = sessionmaker(bind=engine)
     monkeypatch.setattr("services.play.sessions.SessionLocal", Session)
     monkeypatch.setattr("services.play.campaigns.SessionLocal", Session)
+    monkeypatch.setattr("services.play.gm.opening.SessionLocal", Session)
+    monkeypatch.setattr(
+        "services.play.gm.opening.resolve_gm_llm",
+        lambda: __import__("services.play.gm.mock_llm", fromlist=["MockGMLLM"]).MockGMLLM(),
+    )
 
     db = Session()
     host = User(clerk_id="host", email="host@ex.com")
@@ -101,13 +106,13 @@ def test_host_creates_lobby_with_invite(db_setup):
     assert gs.campaign_id == campaign.id
 
 
-def test_cannot_create_second_active_session(db_setup):
+def test_create_returns_existing_active_session(db_setup):
     host = db_setup["host"]
     campaign = db_setup["campaign"]
-    create_game_session(host.id, campaign.id)
-    with pytest.raises(SessionError) as exc:
-        create_game_session(host.id, campaign.id)
-    assert exc.value.code == "session_exists"
+    first = create_game_session(host.id, campaign.id)
+    second = create_game_session(host.id, campaign.id)
+    assert second.id == first.id
+    assert second.invite_code == first.invite_code
 
 
 def test_players_join_via_invite(db_setup):
@@ -169,6 +174,20 @@ def test_start_requires_two_to_four_claimed_players(db_setup):
 
     started = start_game_session(host.id, gs.id)
     assert started.status == "ACTIVE"
+    db = Session()
+    from models.entities import GameEvent
+
+    narr = (
+        db.query(GameEvent)
+        .filter(GameEvent.game_session_id == gs.id, GameEvent.type == "gm_narration")
+        .order_by(GameEvent.seq.desc())
+        .first()
+    )
+    assert narr is not None
+    payload = json.loads(narr.payload_json)
+    assert payload.get("kind") == "session_opening"
+    assert payload.get("text")
+    db.close()
 
 
 def test_non_host_cannot_start_or_end(db_setup):

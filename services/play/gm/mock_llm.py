@@ -25,6 +25,32 @@ class MockGMLLM:
         if lower.startswith("gm_script:"):
             return self._scripted(action, character_id)
 
+        if context.get("purpose") == "session_opening" or lower.startswith("system:session_opening"):
+            blueprint = context.get("blueprint") or {}
+            premise = (blueprint.get("premise") or "Trouble gathers at the edge of the map.").strip()
+            title = (blueprint.get("title") or "the adventure").strip()
+            party = context.get("party") or []
+            names = ", ".join(p.get("name") for p in party if p.get("name")) or "the party"
+            location = "the salt docks" if "salt" in premise.lower() or "salt" in title.lower() else "the threshold"
+            return LLMTurn(
+                tool_calls=[
+                    {
+                        "name": "update_world_state",
+                        "args": {
+                            "patch": {
+                                "scene": f"Opening of {title}",
+                                "location": location,
+                                "notes": [premise[:160]],
+                            }
+                        },
+                    }
+                ],
+                narration=(
+                    f"{names} stand at {location}. {premise} "
+                    "The air is tense; the next move is yours."
+                ),
+            )
+
         if "roll" in lower or "d20" in lower:
             notation = "1d20"
             m = re.search(r"(\d*)d(\d+)", lower)

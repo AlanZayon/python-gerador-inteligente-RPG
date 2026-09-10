@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import secrets
 import string
 from datetime import datetime
@@ -11,6 +12,8 @@ from models.entities import Campaign, CampaignCharacter, GameSession, SessionPla
 from services.play.events import event_to_envelope, record_event
 from services.play import hub as hub_module
 from sqlalchemy.exc import IntegrityError
+
+logger = logging.getLogger(__name__)
 
 MIN_PLAYERS = 2
 MAX_PLAYERS = 4
@@ -57,7 +60,8 @@ def create_game_session(user_id: str, campaign_id: str) -> GameSession:
             .first()
         )
         if existing:
-            raise SessionError("session_exists", "Campaign already has an active GameSession")
+            # Host reopening the table — return the live session instead of 409.
+            return existing
 
         code = _invite_code()
         while db.query(GameSession).filter(GameSession.invite_code == code).first():
@@ -192,8 +196,10 @@ def claim_character(user_id: str, session_id: str, character_id: str) -> Session
         if taken and taken.user_id != user_id:
             raise SessionError("character_taken", "Character already claimed")
 
+        # Only drop ready when switching characters — re-claiming the same one is a no-op.
+        if membership.character_id != character_id:
+            membership.ready = False
         membership.character_id = character_id
-        membership.ready = False
         ev = record_event(
             db,
             session_id=session_id,
@@ -295,6 +301,14 @@ def start_game_session(user_id: str, session_id: str) -> GameSession:
         db.commit()
         hub_module.default_hub.publish(envelope["session_id"], envelope)
         db.refresh(gs)
+
+        try:
+            from services.play.gm.opening import deliver_session_opening
+
+            deliver_session_opening(session_id)
+        except Exception:
+            logger.exception("Session opening narration failed for %s", session_id)
+
         return gs
     except SessionError:
         db.rollback()
@@ -348,6 +362,11 @@ def get_session_for_user(user_id: str, session_id: str) -> GameSession | None:
             return None
         if not _get_membership(db, session_id, user_id):
             return None
+        # Heal short rosters so multiplayer lobbies can claim seats.
+        from services.play.campaigns import ensure_claimable_roster
+
+        if ensure_claimable_roster(db, gs.campaign_id):
+            db.commit()
         return gs
     finally:
         db.close()

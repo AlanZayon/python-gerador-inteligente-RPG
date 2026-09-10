@@ -102,7 +102,7 @@ def submit_player_action(
             if next_slot is slot:
                 continue
 
-    if not done.wait(timeout=120):
+    if not done.wait(timeout=150):
         raise ActionError("timeout", "Timed out waiting for GameMasterRuntime")
     if slot["error"]:
         raise slot["error"]

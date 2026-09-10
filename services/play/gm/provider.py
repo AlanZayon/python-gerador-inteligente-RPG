@@ -15,5 +15,11 @@ def resolve_gm_llm():
         from services.llm_client import is_configured
 
         if is_configured():
-            return LiveGMLLM()
+            model = (
+                os.getenv("GM_LLM_MODEL")
+                or os.getenv("LLM_MODEL_FLASH")
+                or os.getenv("LLM_MODEL")
+                or None
+            )
+            return LiveGMLLM(model=model)
     return MockGMLLM()

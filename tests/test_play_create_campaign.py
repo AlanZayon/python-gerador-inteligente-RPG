@@ -92,7 +92,8 @@ def test_create_campaign_from_job_copies_blueprint_book_and_roster(db_setup):
         .order_by(CampaignCharacter.sort_order)
         .all()
     )
-    assert [c.display_name for c in chars] == ["Mira", "Joren"]
+    assert [c.display_name for c in chars][:2] == ["Mira", "Joren"]
+    assert len(chars) >= 4  # pad to table seats even with fewer uploaded sheets
     assert all(c.claimable for c in chars)
     assert json.loads(chars[0].sheet_json)["class"] == "Fighter"
     db.close()

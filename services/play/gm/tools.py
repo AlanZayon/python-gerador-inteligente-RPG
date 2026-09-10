@@ -224,6 +224,13 @@ def execute_tool(ctx: ToolContext, name: str, args: dict) -> dict:
         out = {"ok": True, "result": ctx.state}
     elif name == "update_world_state":
         patch = args.get("patch") or {}
+        if isinstance(patch, str):
+            try:
+                patch = json.loads(patch)
+            except json.JSONDecodeError:
+                patch = {}
+        if not isinstance(patch, dict):
+            patch = {}
         for key in ("scene", "location"):
             if key in patch and isinstance(patch[key], str):
                 ctx.state[key] = patch[key]
@@ -242,12 +249,26 @@ def execute_tool(ctx: ToolContext, name: str, args: dict) -> dict:
         out = {"ok": True, "result": ctx.state}
     elif name == "create_event":
         payload = args.get("payload") or {}
+        if isinstance(payload, str):
+            try:
+                payload = json.loads(payload)
+            except json.JSONDecodeError:
+                payload = {"text": payload}
+        if not isinstance(payload, dict):
+            payload = {"value": payload}
         ev_type = args.get("type") or "narration"
         ctx.append_event(ev_type, payload)
         out = {"ok": True, "result": {"type": ev_type, "payload": payload}}
     elif name == "update_character":
         character_id = args.get("character_id")
         fields = args.get("fields") or {}
+        if isinstance(fields, str):
+            try:
+                fields = json.loads(fields)
+            except json.JSONDecodeError:
+                fields = {}
+        if not isinstance(fields, dict):
+            fields = {}
         if not character_id:
             out = {"ok": False, "error": "character_id required"}
         else:

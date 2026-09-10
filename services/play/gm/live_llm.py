@@ -124,11 +124,23 @@ class LiveGMLLM:
             "You are the Game Master Runtime for a multiplayer tabletop session. "
             "Use tools for dice, checks, and Campaign State changes. "
             "Never invent dice totals when a tool exists. "
-            "Keep public narration concise. Do not decide a PC's voluntary actions."
+            "Keep public narration concise and in-world. "
+            "Do not decide a PC's voluntary actions. "
+            "Never narrate your planning ('I am reading…', 'I'll prepare…') — "
+            "only describe what the table sees and hears."
         )
+        if context.get("purpose") == "session_opening":
+            system += (
+                " This is the SESSION OPENING: establish place, atmosphere, and an "
+                "immediate situation the party can act on. Address the table, not a single PC. "
+                "Call update_world_state with scene and location. No dice yet unless essential."
+            )
+        party = context.get("party") or []
         user = {
+            "purpose": context.get("purpose") or "gm_turn",
             "player_action": context.get("player_action"),
             "character_name": context.get("character_name"),
+            "party": [{"name": p.get("name")} for p in party[:6]],
             "campaign_state": {
                 "scene": state.get("scene"),
                 "location": state.get("location"),
@@ -139,6 +151,7 @@ class LiveGMLLM:
             },
             "blueprint_title": blueprint.get("title"),
             "blueprint_premise": (blueprint.get("premise") or "")[:500],
+            "blueprint_tone": (blueprint.get("tone") or "")[:200],
             "rules_excerpts": rules_block,
         }
         return [
