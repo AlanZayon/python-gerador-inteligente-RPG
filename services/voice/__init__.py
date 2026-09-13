@@ -1,28 +1,19 @@
-"""Voice providers — STT / TTS via 9router (OpenAI-compatible audio APIs)."""
+"""Voice providers — STT / TTS (9router + ElevenLabs)."""
 
 from __future__ import annotations
 
 import base64
 import os
-from dataclasses import dataclass
 from typing import Protocol
 
-
-@dataclass
-class VoiceAudio:
-    content_type: str
-    data: bytes
-
-    @property
-    def data_base64(self) -> str:
-        return base64.b64encode(self.data).decode("ascii")
-
-    def to_dict(self) -> dict:
-        return {
-            "content_type": self.content_type,
-            "data_base64": self.data_base64,
-            "byte_length": len(self.data),
-        }
+from services.voice.models import (
+    AudioResult,
+    Narration,
+    TTSRequest,
+    VoiceAudio,
+    VoiceDirection,
+    VoiceProfile,
+)
 
 
 class SpeechToTextProvider(Protocol):
@@ -217,6 +208,27 @@ class NineRouterTextToSpeech:
 OpenAICompatibleSpeechToText = NineRouterSpeechToText
 OpenAICompatibleTextToSpeech = NineRouterTextToSpeech
 
+__all__ = [
+    "AudioResult",
+    "DisabledSpeechToText",
+    "DisabledTextToSpeech",
+    "MockSpeechToText",
+    "MockTextToSpeech",
+    "Narration",
+    "NineRouterSpeechToText",
+    "NineRouterTextToSpeech",
+    "OpenAICompatibleSpeechToText",
+    "OpenAICompatibleTextToSpeech",
+    "SpeechToTextProvider",
+    "TTSRequest",
+    "TextToSpeechProvider",
+    "VoiceAudio",
+    "VoiceDirection",
+    "VoiceProfile",
+    "resolve_stt",
+    "resolve_tts",
+]
+
 
 def resolve_stt() -> SpeechToTextProvider:
     provider = (os.getenv("VOICE_STT_PROVIDER") or "mock").strip().lower()
@@ -241,6 +253,33 @@ def resolve_tts() -> TextToSpeechProvider:
     provider = (os.getenv("VOICE_TTS_PROVIDER") or "mock").strip().lower()
     if provider in {"off", "disabled", "none"}:
         return DisabledTextToSpeech()
+    if provider in {"elevenlabs", "eleven"}:
+        from services.voice.config import (
+            elevenlabs_api_key,
+            elevenlabs_default_model_id,
+            elevenlabs_default_voice_id,
+            elevenlabs_enabled,
+            elevenlabs_max_retries,
+            elevenlabs_output_format,
+            elevenlabs_timeout_seconds,
+        )
+        from services.voice.elevenlabs_tts import ElevenLabsTTSProvider
+
+        if not elevenlabs_enabled():
+            return MockTextToSpeech()
+        key = elevenlabs_api_key()
+        if not key:
+            raise RuntimeError(
+                "VOICE_TTS_PROVIDER is elevenlabs but ELEVENLABS_API_KEY is unset"
+            )
+        return ElevenLabsTTSProvider(
+            api_key=key,
+            default_voice_id=elevenlabs_default_voice_id(),
+            model_id=elevenlabs_default_model_id(),
+            output_format=elevenlabs_output_format(),
+            timeout_seconds=elevenlabs_timeout_seconds(),
+            max_retries=elevenlabs_max_retries(),
+        )
     if provider in {"9router", "ninerouter", "openai", "live"}:
         key = _ninerouter_key()
         if not key:

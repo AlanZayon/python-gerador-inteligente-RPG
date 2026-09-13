@@ -38,6 +38,8 @@ def live_table(monkeypatch):
         "services.play.gm.runtime.retrieve_gm_rules",
         lambda **kwargs: [],
     )
+    monkeypatch.setenv("VOICE_TTS_PROVIDER", "mock")
+    monkeypatch.setenv("VOICE_STT_PROVIDER", "mock")
 
     import services.play.gm.actions as actions_mod
 

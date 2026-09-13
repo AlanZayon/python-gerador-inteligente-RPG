@@ -32,6 +32,7 @@ def db_setup(monkeypatch):
         "services.play.gm.opening.resolve_gm_llm",
         lambda: __import__("services.play.gm.mock_llm", fromlist=["MockGMLLM"]).MockGMLLM(),
     )
+    monkeypatch.setenv("VOICE_TTS_PROVIDER", "mock")
 
     db = Session()
     host = User(clerk_id="host", email="host@ex.com")

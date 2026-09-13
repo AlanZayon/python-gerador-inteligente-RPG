@@ -87,6 +87,7 @@ flowchart TD
 | 7 | [Evaluation](07-evaluation.md) | You want the 4×3 matrix and what the metric actually measures |
 | 8 | [Limits & roadmap](08-limits.md) | You want what is still unsolved |
 | 9 | [Glossary](09-glossary.md) | You want a short definition |
+| 10 | [Voice](10-voice.md) | You want ElevenLabs TTS, Audio Tags, and the VoiceDirector |
 
 Each chapter footer: **Previous · Index · Next**.
 
@@ -105,6 +106,7 @@ Each chapter footer: **Previous · Index · Next**.
 | Structural validator | `services/campaign_quality.py` |
 | RAG | `services/rag/` |
 | LLM (9router) | `services/llm_client.py` |
+| Voice (ElevenLabs TTS) | `services/voice/` |
 | Offline eval | `scripts/eval_reference_campaigns.py` |
 
 System presets: `generic`, `dnd5e`, `pf2e`, `coc`, `gurps`, `blood_honor`, `fragged`.

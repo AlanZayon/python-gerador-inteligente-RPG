@@ -20,6 +20,8 @@
 | **Front** | Pressão off-screen (impulse, portents, doom) |
 | **Fallback-full** | Um único prompt clássico quando o plano JSON não serve |
 | **Ack** | `LREM` do job em `rpg:processing_jobs` após sucesso ou falha terminal |
+| **Voice Director** | Transforma a narração da mesa em input de TTS (speaker, Audio Tags); não conhece regras |
+| **Voice Profile** | Nome do speaker → `voice_id` ElevenLabs |
 
 ---
 

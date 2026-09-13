@@ -10,6 +10,9 @@ import json
 import redis
 from datetime import datetime
 
+# .env must win over a stale process env (Cursor shells persist variables).
+load_dotenv(override=True)
+
 from database import check_database_connection, init_db
 from tasks.campaign_tasks import is_llm_configured
 from examples.campaign_samples import get_sample_campaign
@@ -46,7 +49,6 @@ from routes.campaigns import campaigns_bp
 from routes.sessions import sessions_bp
 from routes.ws_sessions import register_session_sockets
 
-load_dotenv()
 validate_production_auth_config()
 init_sentry()
 
@@ -55,6 +57,11 @@ logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
+logger.info(
+    "tts.config provider=%s voice_id=%s",
+    os.getenv("VOICE_TTS_PROVIDER"),
+    os.getenv("ELEVENLABS_DEFAULT_VOICE_ID"),
+)
 
 IS_PRODUCTION = os.getenv("FLASK_ENV", "").lower() == "production"
 USE_GHA_WORKER = os.getenv("USE_GHA_WORKER", "false").lower() == "true"

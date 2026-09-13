@@ -1,6 +1,6 @@
 # 9. Glossary
 
-[← Limits](08-limits.md) · [Index](README.md)
+[← Limits](08-limits.md) · [Index](README.md) · [Next: Voice →](10-voice.md)
 
 ---
 
@@ -20,6 +20,8 @@
 | **Front** | Off-screen pressure (impulse, portents, doom) |
 | **Fallback-full** | Legacy single prompt when JSON planning fails |
 | **Ack** | `LREM` of the job from `rpg:processing_jobs` after terminal success or failure |
+| **Voice Director** | Turns table narration into TTS input (speaker, Audio Tags); not game rules |
+| **Voice Profile** | Speaker name → ElevenLabs `voice_id` |
 
 ---
 

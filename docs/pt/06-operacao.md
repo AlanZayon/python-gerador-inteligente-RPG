@@ -26,9 +26,11 @@ python worker.py               # segundo terminal
 
 ## Variáveis
 
-Grupos em `.env.example`: Flask, `DATABASE_URL`, AWS/S3, Redis, 9router/LLM, Clerk, Stripe, Resend, Sentry, CORS, worker, `RAG_*`, GitHub dispatch.
+Grupos em `.env.example`: Flask, `DATABASE_URL`, AWS/S3, Redis, 9router/LLM, TTS ElevenLabs, Clerk, Stripe, Resend, Sentry, CORS, worker, `RAG_*`, GitHub dispatch.
 
 Nunca commitar `.env`. PDFs e `examples/eval_runs/` estão no `.gitignore`.
+
+Voz e teste manual: [Voz](10-voz.md).
 
 ## CI
 
@@ -40,6 +42,7 @@ Nunca commitar `.env`. PDFs e `examples/eval_runs/` estão no `.gitignore`.
 
 - Magic bytes PDF; `job_id` UUID
 - Auth Clerk / API key; dev token bloqueado em production
+- API key ElevenLabs só no servidor (nunca no Vue nem em logs)
 - Rate limits Redis
 - Webhook Stripe assinado + eventos idempotentes
 - Erros opacos em production

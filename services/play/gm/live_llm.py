@@ -9,6 +9,7 @@ from typing import Any, Callable
 from services.llm_client import chat_completion, default_model
 from services.play.gm.mock_llm import LLMTurn
 from services.play.gm.tools import TOOL_NAMES, openai_tool_definitions
+from services.voice.spoken import parse_spoken_content
 
 logger = logging.getLogger(__name__)
 
@@ -55,6 +56,8 @@ class LiveGMLLM:
         self._chat = chat_fn or chat_completion
         self._model = model
         self.last_observability: dict[str, Any] = {}
+        self.last_speaker = "gm"
+        self.last_voice_direction = None
 
     def complete_turn(self, context: dict) -> LLMTurn:
         messages = self._build_messages(context)
@@ -70,7 +73,15 @@ class LiveGMLLM:
         self._record_obs(resp, phase="complete_turn")
         content = ((resp.get("message") or {}).get("content") or "").strip()
         tool_calls = validate_tool_calls(resp.get("tool_calls") or [])
-        return LLMTurn(tool_calls=tool_calls, narration=content)
+        text, speaker, voice_direction = parse_spoken_content(content)
+        self.last_speaker = speaker
+        self.last_voice_direction = voice_direction
+        return LLMTurn(
+            tool_calls=tool_calls,
+            narration=text,
+            speaker=speaker,
+            voice_direction=voice_direction,
+        )
 
     def narrate_after_tools(self, context: dict, tool_results: list[dict]) -> str:
         messages = self._build_messages(context)
@@ -93,7 +104,11 @@ class LiveGMLLM:
             max_tokens=512,
         )
         self._record_obs(resp, phase="narrate_after_tools", accumulate=True)
-        return ((resp.get("message") or {}).get("content") or "").strip() or "The moment passes."
+        content = ((resp.get("message") or {}).get("content") or "").strip() or "The moment passes."
+        text, speaker, voice_direction = parse_spoken_content(content)
+        self.last_speaker = speaker
+        self.last_voice_direction = voice_direction
+        return text or "The moment passes."
 
     def _record_obs(self, resp: dict, phase: str, accumulate: bool = False) -> None:
         usage = resp.get("usage") or {}
@@ -127,7 +142,13 @@ class LiveGMLLM:
             "Keep public narration concise and in-world. "
             "Do not decide a PC's voluntary actions. "
             "Never narrate your planning ('I am reading…', 'I'll prepare…') — "
-            "only describe what the table sees and hears."
+            "only describe what the table sees and hears. "
+            "When generating spoken narration, you may return a JSON object "
+            '{"text": "...", "speaker": "gm", "voice_direction": {"tags": ["[whispers]"]}}. '
+            "Voice direction affects only delivery of the generated narration. "
+            "It must never modify game rules, world state, character state, inventory, "
+            "combat state, or quests. Prefer concise, natural audio tags appropriate "
+            "for ElevenLabs. Plain narration text is also fine."
         )
         if context.get("purpose") == "session_opening":
             system += (

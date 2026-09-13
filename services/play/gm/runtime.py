@@ -178,6 +178,8 @@ def run_gm_flight(
             )
 
         narration = (turn.narration or "").strip()
+        speaker = getattr(turn, "speaker", None) or "gm"
+        voice_direction = getattr(turn, "voice_direction", None)
         if _needs_table_narration(narration, bool(ctx.tool_results)) and hasattr(
             llm, "narrate_after_tools"
         ):
@@ -187,6 +189,10 @@ def run_gm_flight(
             )
             if follow and len(follow.strip()) >= len(narration):
                 narration = follow.strip()
+                if getattr(llm, "last_speaker", None):
+                    speaker = llm.last_speaker
+                if getattr(llm, "last_voice_direction", None) is not None:
+                    voice_direction = llm.last_voice_direction
         if not narration:
             narration = "The moment hangs in the air."
 
@@ -245,45 +251,38 @@ def run_gm_flight(
             },
         )
 
-        audio_dict = None
-        audio_envelope = None
-        if speak:
-            try:
-                from services.voice import resolve_tts
-
-                tts_provider = tts if tts is not None else resolve_tts()
-                audio = tts_provider.synthesize(table_narration)
-                audio_dict = audio.to_dict()
-                # Ephemeral hub delivery — do not persist base64 blobs in game_events.
-                audio_envelope = {
-                    "version": 1,
-                    "type": "gm_audio",
-                    "session_id": session_id,
-                    "event_id": None,
-                    "seq": None,
-                    "actor_id": user_id,
-                    "target_id": None,
-                    "payload": {
-                        "content_type": audio_dict["content_type"],
-                        "data_base64": audio_dict["data_base64"],
-                        "byte_length": audio_dict["byte_length"],
-                        "for_narration": True,
-                    },
-                    "created_at": None,
-                }
-            except Exception:
-                # Text-first: voice misconfiguration must not soft-lock the table.
-                audio_dict = None
-                audio_envelope = None
-
         ctx.persist_state(bump_version=True)
-
         envelopes = [event_to_envelope(ev) for ev in ctx._pending_publish]
         db.commit()
         for envelope in envelopes:
             hub_module.default_hub.publish(session_id, envelope)
-        if audio_envelope:
-            hub_module.default_hub.publish(session_id, audio_envelope)
+
+        audio_dict = None
+        if speak:
+            try:
+                from services.play.gm.voice_out import gm_audio_envelope, synthesize_table_audio
+
+                audio_dict = synthesize_table_audio(
+                    text=table_narration,
+                    speaker=speaker,
+                    voice_direction=voice_direction,
+                    tts=tts,
+                )
+                if audio_dict:
+                    if speaker:
+                        audio_dict["speaker"] = speaker
+                    hub_module.default_hub.publish(
+                        session_id,
+                        gm_audio_envelope(
+                            session_id=session_id,
+                            actor_id=user_id,
+                            audio_dict=audio_dict,
+                        ),
+                    )
+            except Exception:
+                # Text-first: voice failure must not roll back Campaign State.
+                audio_dict = None
+
         db.refresh(gs)
         return {
             "narration": table_narration,

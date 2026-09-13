@@ -224,3 +224,22 @@ def test_text_only_still_works_when_tts_disabled(live_table, monkeypatch):
     )
     assert result["narration"]
     assert result.get("audio") is None
+
+
+class _BoomTTS:
+    def synthesize(self, text: str, voice: str | None = None):
+        raise RuntimeError("elevenlabs down")
+
+
+def test_tts_failure_keeps_narration_and_state(live_table):
+    result = submit_player_action(
+        live_table["host"].id,
+        live_table["session_id"],
+        "I open the door.",
+        llm=MockGMLLM(),
+        tts=_BoomTTS(),
+        speak=True,
+    )
+    assert result["narration"]
+    assert result.get("audio") is None
+    assert result["state_version"] >= 2

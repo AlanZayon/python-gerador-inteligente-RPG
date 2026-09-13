@@ -87,7 +87,8 @@ Copy `.env.example` and configure:
 - **AWS_***, **S3_BUCKET_NAME** — required for uploads
 - **REDIS_URL** — required for async mode
 - **CLERK_JWKS_URL**, **CLERK_ISSUER** — required in production
-- **NINEROUTER_URL**, **NINEROUTER_KEY** — local 9router gateway
+- **NINEROUTER_URL**, **NINEROUTER_KEY** — local 9router gateway (LLM + STT)
+- **ELEVENLABS_API_KEY**, **ELEVENLABS_DEFAULT_VOICE_ID** — optional live TTS (`VOICE_TTS_PROVIDER=elevenlabs`)
 - **STRIPE_*** — billing (checkout, webhook, price IDs)
 - **SENTRY_DSN** — optional error tracking
 
@@ -97,6 +98,7 @@ Copy `.env.example` and configure:
 pip install -r requirements.txt
 pytest -q
 ruff check app.py worker.py services tasks tests routes
+python scripts/gm_voice_test.py --text "A porta começa a se abrir lentamente..." --speaker gm
 ```
 
 ## Security

@@ -28,8 +28,10 @@ docs/
 │   ├── 06-operacao.md
 │   ├── 07-avaliacao.md
 │   ├── 08-limites.md
-│   └── 09-glossario.md
+│   ├── 09-glossario.md
+│   └── 10-voz.md
 └── en/                    ← same structure in English
+    └── 10-voice.md
 ```
 
 PDFs de livros e campanhas geradas em `examples/eval_runs/` ficam no disco local e **não** entram no git.

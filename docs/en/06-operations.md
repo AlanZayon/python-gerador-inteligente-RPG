@@ -26,7 +26,9 @@ Procfile: Gunicorn (`timeout 120`) + `python worker.py` as **two** services. Pos
 
 ## Configuration
 
-See `.env.example`: Flask, `DATABASE_URL`, AWS, Redis, 9router/LLM, Clerk, Stripe, Resend, Sentry, CORS, worker, `RAG_*`, GitHub dispatch. Never commit `.env`. Rulebook PDFs and `examples/eval_runs/` are gitignored.
+See `.env.example`: Flask, `DATABASE_URL`, AWS, Redis, 9router/LLM, ElevenLabs TTS, Clerk, Stripe, Resend, Sentry, CORS, worker, `RAG_*`, GitHub dispatch. Never commit `.env`. Rulebook PDFs and `examples/eval_runs/` are gitignored.
+
+Voice setup and the manual GM voice script: [Voice](10-voice.md).
 
 ## CI
 
@@ -36,7 +38,7 @@ Python 3.11, `ruff check app.py worker.py services tasks tests`, `pytest -q`.
 
 ## Security
 
-PDF magic bytes; UUID job ids; Clerk/API keys; production blocks dev auth; Redis rate limits; signed Stripe webhooks; opaque 500s in production; credit refund on worker failure; FAISS/PDFs stay off git.
+PDF magic bytes; UUID job ids; Clerk/API keys; ElevenLabs API key stays on the server (never in the Vue client or logs); production blocks dev auth; Redis rate limits; signed Stripe webhooks; opaque 500s in production; credit refund on worker failure; FAISS/PDFs stay off git.
 
 ## Observability
 

@@ -11,6 +11,8 @@ from typing import Any
 class LLMTurn:
     tool_calls: list[dict[str, Any]] = field(default_factory=list)
     narration: str = ""
+    speaker: str = "gm"
+    voice_direction: Any | None = None
 
 
 class MockGMLLM:
@@ -21,6 +23,21 @@ class MockGMLLM:
         lower = action.lower()
         character_id = context.get("actor_character_id")
         state = context.get("campaign_state") or {}
+
+        if lower.startswith("gm_script:voice"):
+            from services.voice.models import VoiceDirection
+
+            return LLMTurn(
+                tool_calls=[
+                    {
+                        "name": "update_world_state",
+                        "args": {"patch": {"notes": ["voice script"]}},
+                    }
+                ],
+                narration="A porta começa a se abrir lentamente...",
+                speaker="gm",
+                voice_direction=VoiceDirection(tags=["[slowly]", "[whispers]"]),
+            )
 
         if lower.startswith("gm_script:"):
             return self._scripted(action, character_id)

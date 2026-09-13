@@ -1,0 +1,19 @@
+{
+  "voices": {
+    "gm": {
+      "voice_id": "REPLACE_WITH_YOUR_GM_VOICE_ID"
+    },
+    "narrator": {
+      "voice_id": "REPLACE_WITH_YOUR_NARRATOR_VOICE_ID"
+    },
+    "villain": {
+      "voice_id": "REPLACE_WITH_YOUR_VILLAIN_VOICE_ID"
+    },
+    "goblin": {
+      "voice_id": "REPLACE_WITH_YOUR_GOBLIN_VOICE_ID"
+    },
+    "merchant": {
+      "voice_id": "REPLACE_WITH_YOUR_MERCHANT_VOICE_ID"
+    }
+  }
+}

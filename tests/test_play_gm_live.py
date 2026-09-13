@@ -42,6 +42,8 @@ def live_table(monkeypatch):
         "services.play.gm.runtime.retrieve_gm_rules",
         lambda **kwargs: [],
     )
+    monkeypatch.setenv("VOICE_TTS_PROVIDER", "mock")
+    monkeypatch.setenv("VOICE_STT_PROVIDER", "mock")
 
     import services.play.gm.actions as actions_mod
 
@@ -136,6 +138,39 @@ class _FakeChat:
         return self.responses.pop(0)
 
 
+def test_live_llm_parses_json_spoken_content():
+    payload = {
+        "text": "A porta começa a se abrir...",
+        "speaker": "gm",
+        "voice_direction": {"tags": ["[slowly]", "[whispers]"]},
+    }
+    fake = _FakeChat(
+        [
+            {
+                "message": {"role": "assistant", "content": json.dumps(payload)},
+                "tool_calls": [],
+                "usage": {},
+                "model": "my-combo",
+                "latency_ms": 1.0,
+                "raw": {},
+            }
+        ]
+    )
+    llm = LiveGMLLM(chat_fn=fake)
+    turn = llm.complete_turn(
+        {
+            "player_action": "I wait.",
+            "campaign_state": {},
+            "blueprint": {},
+        }
+    )
+    assert turn.narration == "A porta começa a se abrir..."
+    assert turn.speaker == "gm"
+    assert turn.voice_direction is not None
+    assert turn.voice_direction.tags == ["[slowly]", "[whispers]"]
+    assert "Voice direction affects only delivery" in fake.calls[0]["messages"][0]["content"]
+
+
 def test_live_llm_executes_validated_tool_calls(live_table, monkeypatch):
     fake = _FakeChat(
         [
@@ -194,7 +229,15 @@ def test_invalid_tool_calls_are_skipped(live_table, monkeypatch):
                 "model": "my-combo",
                 "latency_ms": 1.0,
                 "raw": {},
-            }
+            },
+            {
+                "message": {"role": "assistant", "content": "Nothing happens at the table."},
+                "tool_calls": [],
+                "usage": {},
+                "model": "my-combo",
+                "latency_ms": 1.0,
+                "raw": {},
+            },
         ]
     )
     monkeypatch.setattr("services.play.gm.live_llm.chat_completion", fake)
@@ -224,7 +267,15 @@ def test_malformed_tool_arguments_are_tolerated(live_table, monkeypatch):
                 "model": "my-combo",
                 "latency_ms": 1.0,
                 "raw": {},
-            }
+            },
+            {
+                "message": {"role": "assistant", "content": "You pause at the threshold."},
+                "tool_calls": [],
+                "usage": {},
+                "model": "my-combo",
+                "latency_ms": 1.0,
+                "raw": {},
+            },
         ]
     )
     monkeypatch.setattr("services.play.gm.live_llm.chat_completion", fake)

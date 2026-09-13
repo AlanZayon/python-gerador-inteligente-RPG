@@ -46,3 +46,6 @@ models/*.gguf
 *.gguf
 *.pdf
 arcane_forge.db
+
+# Manual TTS output
+.scratch/*.mp3

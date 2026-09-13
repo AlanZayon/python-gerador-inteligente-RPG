@@ -180,31 +180,29 @@ def deliver_session_opening(
 
         audio_dict = None
         try:
-            from services.voice import resolve_tts
+            from services.play.gm.voice_out import gm_audio_envelope, synthesize_table_audio
 
-            tts = resolve_tts()
-            audio = tts.synthesize(narration)
-            audio_dict = audio.to_dict()
-            hub_module.default_hub.publish(
-                session_id,
-                {
-                    "version": 1,
-                    "type": "gm_audio",
-                    "session_id": session_id,
-                    "event_id": None,
-                    "seq": None,
-                    "actor_id": actor_user_id,
-                    "target_id": None,
-                    "payload": {
-                        "content_type": audio_dict["content_type"],
-                        "data_base64": audio_dict["data_base64"],
-                        "byte_length": audio_dict["byte_length"],
-                        "for_narration": True,
-                        "kind": "session_opening",
-                    },
-                    "created_at": None,
-                },
+            speaker = getattr(turn, "speaker", None) or getattr(llm, "last_speaker", None) or "gm"
+            voice_direction = getattr(turn, "voice_direction", None)
+            if getattr(llm, "last_voice_direction", None) is not None:
+                voice_direction = llm.last_voice_direction
+            audio_dict = synthesize_table_audio(
+                text=narration,
+                speaker=speaker,
+                voice_direction=voice_direction,
+                tts=None,
             )
+            if audio_dict:
+                audio_dict["speaker"] = speaker
+                hub_module.default_hub.publish(
+                    session_id,
+                    gm_audio_envelope(
+                        session_id=session_id,
+                        actor_id=actor_user_id,
+                        audio_dict=audio_dict,
+                        extra_payload={"kind": "session_opening"},
+                    ),
+                )
         except Exception:
             audio_dict = None
 

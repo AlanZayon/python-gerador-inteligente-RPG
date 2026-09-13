@@ -87,6 +87,7 @@ flowchart TD
 | 7 | [Avaliação](07-avaliacao.md) | Quiser a matriz 4×3 e o que a métrica mede de verdade |
 | 8 | [Limites e roadmap](08-limites.md) | Quiser o que ainda não está resolvido |
 | 9 | [Glossário](09-glossario.md) | Quiser a definição de um termo |
+| 10 | [Voz](10-voz.md) | Quiser TTS ElevenLabs, Audio Tags e o VoiceDirector |
 
 Navegação em cada capítulo: **Anterior · Índice · Seguinte** no rodapé.
 
@@ -105,6 +106,7 @@ Navegação em cada capítulo: **Anterior · Índice · Seguinte** no rodapé.
 | Validador estrutural | `services/campaign_quality.py` |
 | RAG | `services/rag/` |
 | LLM (9router) | `services/llm_client.py` |
+| Voz (TTS ElevenLabs) | `services/voice/` |
 | Eval offline | `scripts/eval_reference_campaigns.py` |
 
 Presets de sistema: `generic`, `dnd5e`, `pf2e`, `coc`, `gurps`, `blood_honor`, `fragged`.
