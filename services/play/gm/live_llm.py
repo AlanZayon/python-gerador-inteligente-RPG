@@ -131,11 +131,15 @@ class LiveGMLLM:
         )
         if context.get("purpose") == "session_opening":
             system += (
-                " This is the SESSION OPENING: establish place, atmosphere, and an "
-                "immediate situation the party can act on. Address the table, not a single PC. "
+                " This is the SESSION OPENING. Deliver exactly two short beats: "
+                "(1) a concise campaign overview from campaign_overview, "
+                "(2) the starting hook from campaign_start_hook as the live scene. "
+                "Stay faithful to that material — do not invent a new premise. "
+                "Address the table, not a single PC. Keep total narration brief. "
                 "Call update_world_state with scene and location. No dice yet unless essential."
             )
         party = context.get("party") or []
+        brief = context.get("opening_brief") or {}
         user = {
             "purpose": context.get("purpose") or "gm_turn",
             "player_action": context.get("player_action"),
@@ -149,9 +153,10 @@ class LiveGMLLM:
                 "clocks": state.get("clocks"),
                 "npc_flags": state.get("npc_flags"),
             },
-            "blueprint_title": blueprint.get("title"),
-            "blueprint_premise": (blueprint.get("premise") or "")[:500],
-            "blueprint_tone": (blueprint.get("tone") or "")[:200],
+            "blueprint_title": brief.get("title") or blueprint.get("title"),
+            "blueprint_tone": (brief.get("tone") or blueprint.get("tone") or "")[:200],
+            "campaign_overview": (brief.get("overview") or blueprint.get("premise") or "")[:500],
+            "campaign_start_hook": (brief.get("start_hook") or "")[:400],
             "rules_excerpts": rules_block,
         }
         return [

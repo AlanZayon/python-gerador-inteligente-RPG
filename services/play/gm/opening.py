@@ -11,12 +11,27 @@ from database import SessionLocal
 from models.entities import Campaign, CampaignCharacter, GameSession, SessionPlayer
 from services.play import hub as hub_module
 from services.play.events import event_to_envelope
+from services.play.gm.opening_brief import build_opening_brief
 from services.play.gm.provider import resolve_gm_llm
 from services.play.gm.state import load_state
 from services.play.gm.tools import ToolContext, execute_tool
 from services.play.gm.live_llm import validate_tool_calls
 
+
 logger = logging.getLogger(__name__)
+
+
+def _load_manuscript_text(campaign: Campaign | None) -> str | None:
+    if not campaign or not campaign.manuscript_s3_key:
+        return None
+    try:
+        from services.s3_storage import fetch_s3_text, s3_configured
+
+        if not s3_configured():
+            return None
+        return fetch_s3_text(campaign.manuscript_s3_key)
+    except Exception:
+        return None
 
 
 def deliver_session_opening(
@@ -57,6 +72,8 @@ def deliver_session_opening(
             except json.JSONDecodeError:
                 blueprint = {}
 
+        opening_brief = build_opening_brief(blueprint, _load_manuscript_text(campaign))
+
         host_player = next((p for p in players if p.user_id == gs.host_user_id), players[0] if players else None)
         actor_user_id = host_player.user_id if host_player else gs.host_user_id
         actor_character_id = host_player.character_id if host_player else None
@@ -66,10 +83,12 @@ def deliver_session_opening(
             "purpose": "session_opening",
             "player_action": (
                 "SYSTEM:SESSION_OPENING — The session just started. "
-                "Deliver a cold open for the table: where they are, what they sense, "
-                "and what immediate situation invites action. "
-                "Do not decide any PC's voluntary actions. "
-                "Use update_world_state to set scene and location."
+                "Speak to the table in two short beats only: "
+                "(1) a brief campaign overview grounded in campaign_overview, "
+                "(2) the starting hook from campaign_start_hook as the live situation. "
+                "Keep it concise (roughly 120–220 words total). "
+                "Do not invent a different premise. Do not decide any PC's voluntary actions. "
+                "Use update_world_state to set scene and location from the start hook."
             ),
             "actor_user_id": actor_user_id,
             "actor_character_id": actor_character_id,
@@ -77,6 +96,7 @@ def deliver_session_opening(
             "party": party,
             "campaign_state": ctx.state,
             "blueprint": blueprint,
+            "opening_brief": opening_brief,
             "session_status": gs.status,
             "book_id": campaign.book_id if campaign else None,
             "rules_excerpts": [],
@@ -103,11 +123,13 @@ def deliver_session_opening(
             if follow and len(follow.strip()) > len(narration):
                 narration = follow.strip()
         if not narration:
-            title = (blueprint.get("title") or "the adventure").strip()
-            premise = (blueprint.get("premise") or "Trouble stirs nearby.").strip()
+            title = opening_brief["title"]
+            overview = opening_brief["overview"]
+            start_hook = opening_brief["start_hook"]
             narration = (
-                f"You gather for {title}. {premise} "
-                "The table is yours — what do you do?"
+                f"Campaign brief — {title}. {overview} "
+                f"Opening situation: {start_hook} "
+                "What do you do?"
             )
             if not ctx.state.get("scene"):
                 execute_tool(
@@ -117,7 +139,7 @@ def deliver_session_opening(
                         "patch": {
                             "scene": "Session opening",
                             "location": ctx.state.get("location") or "the starting place",
-                            "notes": [premise[:200]],
+                            "notes": [overview[:160], start_hook[:160]],
                         }
                     },
                 )

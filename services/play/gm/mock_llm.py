@@ -26,12 +26,21 @@ class MockGMLLM:
             return self._scripted(action, character_id)
 
         if context.get("purpose") == "session_opening" or lower.startswith("system:session_opening"):
+            from services.play.gm.opening_brief import build_opening_brief
+
             blueprint = context.get("blueprint") or {}
-            premise = (blueprint.get("premise") or "Trouble gathers at the edge of the map.").strip()
-            title = (blueprint.get("title") or "the adventure").strip()
+            brief = context.get("opening_brief") or build_opening_brief(blueprint)
+            title = (brief.get("title") or blueprint.get("title") or "the adventure").strip()
+            overview = (
+                brief.get("overview")
+                or blueprint.get("premise")
+                or "Trouble gathers at the edge of the map."
+            ).strip()
+            start_hook = (brief.get("start_hook") or overview).strip()
             party = context.get("party") or []
             names = ", ".join(p.get("name") for p in party if p.get("name")) or "the party"
-            location = "the salt docks" if "salt" in premise.lower() or "salt" in title.lower() else "the threshold"
+            blob = f"{title} {overview} {start_hook}".lower()
+            location = "the salt docks" if "salt" in blob else "the threshold"
             return LLMTurn(
                 tool_calls=[
                     {
@@ -40,14 +49,15 @@ class MockGMLLM:
                             "patch": {
                                 "scene": f"Opening of {title}",
                                 "location": location,
-                                "notes": [premise[:160]],
+                                "notes": [overview[:160], start_hook[:160]],
                             }
                         },
                     }
                 ],
                 narration=(
-                    f"{names} stand at {location}. {premise} "
-                    "The air is tense; the next move is yours."
+                    f"Overview — {title}. {overview} "
+                    f"Starting hook: {names} face this now — {start_hook} "
+                    "The next move is yours."
                 ),
             )
 

@@ -48,7 +48,29 @@ def db_setup(monkeypatch):
         id="job-lobby",
         user_id=host.id,
         status="completed",
-        blueprint_json=json.dumps({"title": "Salt"}),
+        blueprint_json=json.dumps(
+            {
+                "title": "Salt on the Throne",
+                "premise": "Storms gather over the salt flats and old debts come due.",
+                "central_conflict": "Smugglers versus the crown's tax collectors.",
+                "stakes": "Whoever controls the flats controls the winter grain.",
+                "tone": "gritty",
+                "sessions": [
+                    {
+                        "number": 1,
+                        "title": "Broken Seal",
+                        "dramatic_function": "hook",
+                        "scenes": [
+                            {
+                                "name": "The Dockyard",
+                                "location": "South pier",
+                                "purpose": "Discover the broken seal and choose who to trust",
+                            }
+                        ],
+                    }
+                ],
+            }
+        ),
         book_id="bk_1",
         campaign_s3_key="c.md",
     )
@@ -59,7 +81,7 @@ def db_setup(monkeypatch):
         job_id=job.id,
         host_user_id=host.id,
         book_id="bk_1",
-        title="Salt",
+        title="Salt on the Throne",
         blueprint_json=job.blueprint_json,
         status="ready",
     )
@@ -186,7 +208,10 @@ def test_start_requires_two_to_four_claimed_players(db_setup):
     assert narr is not None
     payload = json.loads(narr.payload_json)
     assert payload.get("kind") == "session_opening"
-    assert payload.get("text")
+    text = payload.get("text") or ""
+    assert text
+    assert "Storms gather" in text
+    assert "Dockyard" in text or "broken seal" in text.lower()
     db.close()
 
 
