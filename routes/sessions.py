@@ -14,7 +14,7 @@ from services.play.sessions import (
     set_ready,
     start_game_session,
 )
-from services.play.gm import ActionError, resolve_gm_llm, submit_player_action
+from services.play.gm import ActionError, confirm_roll, resolve_gm_llm, submit_player_action
 from services.play.gm.opening import deliver_session_opening
 from services.play.sync import SyncError, get_reconnect_snapshot
 from services.play.voice_actions import submit_voice_action
@@ -35,6 +35,8 @@ def _error(exc: SessionError | ActionError | SyncError):
         "stt_failed": 502,
         "timeout": 504,
         "rate_limited": 429,
+        "awaiting_roll": 409,
+        "needs_choice": 409,
     }.get(exc.code, 400)
     return jsonify({"error": exc.code, "message": exc.message}), status
 
@@ -184,6 +186,30 @@ def submit_action(session_id: str):
             llm=resolve_gm_llm(),
             tts=resolve_tts(),
             speak=bool(speak),
+        )
+    except (SessionError, ActionError) as exc:
+        return _error(exc)
+    return jsonify({"success": True, **result})
+
+
+@sessions_bp.route("/<session_id>/rolls/confirm", methods=["POST"])
+@require_user
+def submit_roll_confirm(session_id: str):
+    body = request.get_json(silent=True) or {}
+    pending_id = (body.get("pending_id") or "").strip() or None
+    speak = body.get("speak", False)
+    chosen_skill = (body.get("chosen_skill") or "").strip() or None
+    chosen_index = body.get("chosen_index")
+    try:
+        result = confirm_roll(
+            g.user.id,
+            session_id,
+            pending_id=pending_id,
+            llm=resolve_gm_llm(),
+            tts=resolve_tts(),
+            speak=bool(speak),
+            chosen_skill=chosen_skill,
+            chosen_index=chosen_index,
         )
     except (SessionError, ActionError) as exc:
         return _error(exc)

@@ -38,6 +38,7 @@ def live_table(monkeypatch):
     monkeypatch.setattr("services.play.sessions.SessionLocal", Session)
     monkeypatch.setattr("services.play.gm.runtime.SessionLocal", Session)
     monkeypatch.setattr("services.play.gm.actions.SessionLocal", Session)
+    monkeypatch.setattr("services.play.gm.opening.SessionLocal", Session)
     monkeypatch.setattr(
         "services.play.gm.runtime.retrieve_gm_rules",
         lambda **kwargs: [],
@@ -169,6 +170,69 @@ def test_live_llm_parses_json_spoken_content():
     assert turn.voice_direction is not None
     assert turn.voice_direction.tags == ["[slowly]", "[whispers]"]
     assert "Voice direction affects only delivery" in fake.calls[0]["messages"][0]["content"]
+
+
+def test_live_llm_lookup_then_request_roll(live_table, monkeypatch):
+    fake = _FakeChat(
+        [
+            {
+                "message": {"role": "assistant", "content": ""},
+                "tool_calls": [
+                    {"id": "l1", "name": "lookup_rules", "args": {"query": "climbing checks"}},
+                ],
+                "usage": {},
+                "model": "my-combo",
+                "latency_ms": 1.0,
+                "raw": {},
+            },
+            {
+                "message": {"role": "assistant", "content": ""},
+                "tool_calls": [
+                    {
+                        "id": "r1",
+                        "name": "request_roll",
+                        "args": {
+                            "skill": "Athletics",
+                            "notation": "1d20",
+                            "dc": 12,
+                            "reason": "climb",
+                        },
+                    }
+                ],
+                "usage": {},
+                "model": "my-combo",
+                "latency_ms": 1.0,
+                "raw": {},
+            },
+            {
+                "message": {"role": "assistant", "content": "Roll Athletics (1d20) against DC 12."},
+                "tool_calls": [],
+                "usage": {},
+                "model": "my-combo",
+                "latency_ms": 1.0,
+                "raw": {},
+            },
+        ]
+    )
+    monkeypatch.setattr("services.play.gm.live_llm.chat_completion", fake)
+    llm = LiveGMLLM()
+    result = submit_player_action(
+        live_table["host"].id,
+        live_table["session_id"],
+        "I climb the mast",
+        llm=llm,
+        retrieve_fn=lambda **kw: [{"text": "Climbing is Athletics DC 12.", "score": 1}],
+    )
+    names = [t["name"] for t in result["tool_results"]]
+    assert "lookup_rules" in names
+    assert "request_roll" in names
+    assert result["state"]["pending_check"]["skill"] == "Athletics"
+    assert result["state"]["last_dice"] is None
+    assert any(
+        "tool" == (m.get("role") if isinstance(m, dict) else None)
+        for call in fake.calls
+        for m in (call.get("messages") or [])
+    )
 
 
 def test_live_llm_executes_validated_tool_calls(live_table, monkeypatch):

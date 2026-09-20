@@ -13,6 +13,8 @@ from services.voice.spoken import parse_spoken_content
 
 logger = logging.getLogger(__name__)
 
+MAX_TOOL_ROUNDS = 3
+
 
 def _safe_args(raw: Any) -> dict | None:
     if raw is None:
@@ -44,6 +46,24 @@ def validate_tool_calls(raw_calls: list[dict]) -> list[dict]:
     return validated
 
 
+def _assistant_message_with_tools(resp: dict, tool_calls: list[dict]) -> dict:
+    message = dict(resp.get("message") or {})
+    message.setdefault("role", "assistant")
+    if tool_calls and not message.get("tool_calls"):
+        message["tool_calls"] = [
+            {
+                "id": tc.get("id") or f"call_{i}",
+                "type": "function",
+                "function": {
+                    "name": tc["name"],
+                    "arguments": json.dumps(tc.get("args") or {}, ensure_ascii=False),
+                },
+            }
+            for i, tc in enumerate(tool_calls)
+        ]
+    return message
+
+
 class LiveGMLLM:
     """9router-backed GM. Uses the same tool services as MockGMLLM."""
 
@@ -58,40 +78,38 @@ class LiveGMLLM:
         self.last_observability: dict[str, Any] = {}
         self.last_speaker = "gm"
         self.last_voice_direction = None
+        self._messages: list[dict] = []
 
     def complete_turn(self, context: dict) -> LLMTurn:
-        messages = self._build_messages(context)
-        tools = openai_tool_definitions()
-        resp = self._chat(
-            messages=messages,
-            tools=tools,
-            model=self._model or default_model(),
-            purpose="gm_turn",
-            temperature=0.4,
-            max_tokens=1024,
-        )
-        self._record_obs(resp, phase="complete_turn")
-        content = ((resp.get("message") or {}).get("content") or "").strip()
-        tool_calls = validate_tool_calls(resp.get("tool_calls") or [])
-        text, speaker, voice_direction = parse_spoken_content(content)
-        self.last_speaker = speaker
-        self.last_voice_direction = voice_direction
-        return LLMTurn(
-            tool_calls=tool_calls,
-            narration=text,
-            speaker=speaker,
-            voice_direction=voice_direction,
-        )
+        self._messages = self._build_messages(context)
+        return self._call(phase="complete_turn", accumulate=False)
+
+    def continue_with_tools(self, context: dict, tool_results: list[dict]) -> LLMTurn:
+        if not self._messages:
+            self._messages = self._build_messages(context)
+        for tr in tool_results or []:
+            self._messages.append(
+                {
+                    "role": "tool",
+                    "tool_call_id": tr.get("id") or "",
+                    "name": tr.get("name") or "",
+                    "content": json.dumps(tr.get("result") or tr, ensure_ascii=False)[:6000],
+                }
+            )
+        return self._call(phase="continue_with_tools", accumulate=True)
 
     def narrate_after_tools(self, context: dict, tool_results: list[dict]) -> str:
-        messages = self._build_messages(context)
+        messages = list(self._messages) if self._messages else self._build_messages(context)
         messages.append(
             {
                 "role": "user",
                 "content": (
                     "Tool results (authoritative — do not invent dice):\n"
                     f"{json.dumps(tool_results, ensure_ascii=False)[:4000]}\n"
-                    "Write short public narration for the table."
+                    "Write short public narration for the table. "
+                    "If a Roll Call is pending, speak the call as the GM: name the Character, "
+                    "the skill, the dice, and the DC. "
+                    "Do not write stage directions, asterisks, or 'waiting for the player'."
                 ),
             }
         )
@@ -109,6 +127,30 @@ class LiveGMLLM:
         self.last_speaker = speaker
         self.last_voice_direction = voice_direction
         return text or "The moment passes."
+
+    def _call(self, *, phase: str, accumulate: bool) -> LLMTurn:
+        tools = openai_tool_definitions()
+        resp = self._chat(
+            messages=self._messages,
+            tools=tools,
+            model=self._model or default_model(),
+            purpose="gm_turn",
+            temperature=0.4,
+            max_tokens=1024,
+        )
+        self._record_obs(resp, phase=phase, accumulate=accumulate)
+        content = ((resp.get("message") or {}).get("content") or "").strip()
+        tool_calls = validate_tool_calls(resp.get("tool_calls") or [])
+        self._messages.append(_assistant_message_with_tools(resp, tool_calls))
+        text, speaker, voice_direction = parse_spoken_content(content)
+        self.last_speaker = speaker
+        self.last_voice_direction = voice_direction
+        return LLMTurn(
+            tool_calls=tool_calls,
+            narration=text,
+            speaker=speaker,
+            voice_direction=voice_direction,
+        )
 
     def _record_obs(self, resp: dict, phase: str, accumulate: bool = False) -> None:
         usage = resp.get("usage") or {}
@@ -135,10 +177,24 @@ class LiveGMLLM:
         rules_block = "\n\n".join(
             f"- {ex.get('text', '')[:800]}" for ex in excerpts[:4] if ex.get("text")
         ) or "(no rule excerpts retrieved)"
+        purpose = context.get("purpose") or "gm_turn"
         system = (
             "You are the Game Master Runtime for a multiplayer tabletop session. "
-            "Use tools for dice, checks, and Campaign State changes. "
-            "Never invent dice totals when a tool exists. "
+            "Use lookup_rules to consult the uploaded book when unsure whether a "
+            "Player Character check is required, or which skill, DC, and dice notation to use. "
+            "For a Player Character check, call request_roll — never invent totals "
+            "and never use roll_dice or perform_check for that PC. "
+            "When you call request_roll, the public narration MUST speak the Roll Call "
+            "as table speech in the same language as the scene: address the Character, "
+            "name the skill, the dice notation, and the DC. "
+            "If the Player may choose between checks, pass alternatives and speak both "
+            "options so they can pick. Never mash 'or'/'ou' into a single skill name "
+            "without alternatives. If the declared action already commits to one approach, "
+            "issue a single check. "
+            "Example: 'Kael, faça um teste de Sabedoria (Percepção), 1d20+3, CD 13.' "
+            "Never write stage directions such as 'waiting for the player', "
+            "'aguardando a rolagem', asterisks, or parenthetical asides about waiting. "
+            "Hidden GM/NPC rolls may use roll_dice immediately. "
             "Keep public narration concise and in-world. "
             "Do not decide a PC's voluntary actions. "
             "Never narrate your planning ('I am reading…', 'I'll prepare…') — "
@@ -150,7 +206,7 @@ class LiveGMLLM:
             "combat state, or quests. Prefer concise, natural audio tags appropriate "
             "for ElevenLabs. Plain narration text is also fine."
         )
-        if context.get("purpose") == "session_opening":
+        if purpose == "session_opening":
             system += (
                 " This is the SESSION OPENING. Deliver exactly two short beats: "
                 "(1) a concise campaign overview from campaign_overview, "
@@ -159,21 +215,38 @@ class LiveGMLLM:
                 "Address the table, not a single PC. Keep total narration brief. "
                 "Call update_world_state with scene and location. No dice yet unless essential."
             )
+        if purpose == "roll_resolution":
+            system += (
+                " This is ROLL RESOLUTION. resolved_roll is authoritative. "
+                "Narrate success or failure for the table. "
+                "You may update_world_state. Do not call request_roll."
+            )
         party = context.get("party") or []
         brief = context.get("opening_brief") or {}
+        sheet = context.get("actor_sheet") or {}
         user = {
-            "purpose": context.get("purpose") or "gm_turn",
+            "purpose": purpose,
             "player_action": context.get("player_action"),
             "character_name": context.get("character_name"),
+            "actor_character_id": context.get("actor_character_id"),
+            "system_preset": context.get("system_preset") or "generic",
+            "actor_sheet": {
+                "class": sheet.get("class"),
+                "level": sheet.get("level"),
+                "abilities": (sheet.get("abilities") or "")[:400],
+                "raw_excerpt": (sheet.get("raw_excerpt") or "")[:500],
+            },
             "party": [{"name": p.get("name")} for p in party[:6]],
             "campaign_state": {
                 "scene": state.get("scene"),
                 "location": state.get("location"),
                 "notes": (state.get("notes") or [])[-5:],
                 "last_dice": state.get("last_dice"),
+                "pending_check": state.get("pending_check"),
                 "clocks": state.get("clocks"),
                 "npc_flags": state.get("npc_flags"),
             },
+            "resolved_roll": context.get("resolved_roll"),
             "blueprint_title": brief.get("title") or blueprint.get("title"),
             "blueprint_tone": (brief.get("tone") or blueprint.get("tone") or "")[:200],
             "campaign_overview": (brief.get("overview") or blueprint.get("premise") or "")[:500],

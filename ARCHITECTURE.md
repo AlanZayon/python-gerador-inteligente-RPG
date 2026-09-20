@@ -116,7 +116,7 @@ Player text/voice
 
 ### Authority
 
-- Server owns dice, state mutations, quest clocks, character updates.
+- Server owns dice, state mutations, quest clocks, character updates. PC checks go through a Roll Call; the Player confirms and the server RNG resolves (ADR 0007).
 - LLM proposes tool calls and narrates; it is **not** the source of truth.
 - GM may know character-private facts; each client/context receives filtered knowledge.
 

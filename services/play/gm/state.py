@@ -13,6 +13,7 @@ EMPTY_STATE = {
     "clocks": {},
     "notes": [],
     "last_dice": None,
+    "pending_check": None,
     "quests": {},
     "characters": {},
 }

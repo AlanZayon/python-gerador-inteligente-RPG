@@ -44,6 +44,12 @@ _LORE_QUERY = (
 )
 
 
+def mechanics_query_for_preset(system_preset: str | None) -> str:
+    """Mechanics-lane query used by generation RAG and live GM retrieval."""
+    preset = system_preset or "generic"
+    return _MECHANICS_QUERIES.get(preset, _MECHANICS_QUERIES["generic"])
+
+
 def build_query(theme: str, hook: str = "") -> str:
     """
     Build a retrieval query from campaign theme and optional hook.
@@ -61,11 +67,10 @@ def _lane_queries(
     hook: str = "",
     system_preset: str | None = None,
 ) -> dict[str, str]:
-    preset = system_preset or "generic"
     theme_q = build_query(theme or "adventure", hook)
     return {
         "setting": _SETTING_QUERY,
-        "mechanics": _MECHANICS_QUERIES.get(preset, _MECHANICS_QUERIES["generic"]),
+        "mechanics": mechanics_query_for_preset(system_preset),
         "lore": _LORE_QUERY if not theme else f"{_LORE_QUERY}. Theme: {theme}",
         "theme": theme_q,
     }

@@ -15,6 +15,13 @@ class LLMTurn:
     voice_direction: Any | None = None
 
 
+_SKILL_RE = re.compile(
+    r"\b(climb|sneak|stealth|search|hide|persuade|athletics|perception|"
+    r"check|lockpick|jump|roll|d20|d6)\b",
+    re.I,
+)
+
+
 class MockGMLLM:
     """Scripted tool-using GM. Never invents dice totals — always uses tools."""
 
@@ -23,6 +30,23 @@ class MockGMLLM:
         lower = action.lower()
         character_id = context.get("actor_character_id")
         state = context.get("campaign_state") or {}
+        purpose = context.get("purpose") or "gm_turn"
+
+        if purpose == "roll_resolution":
+            result = context.get("resolved_roll") or state.get("last_dice") or {}
+            total = result.get("total")
+            skill = result.get("skill") or "check"
+            success = result.get("success")
+            if success is True:
+                outcome = "success"
+            elif success is False:
+                outcome = "failure"
+            else:
+                outcome = "the result"
+            return LLMTurn(
+                tool_calls=[],
+                narration=f"The {skill} check is {outcome}. The dice settle on {total}.",
+            )
 
         if lower.startswith("gm_script:voice"):
             from services.voice.models import VoiceDirection
@@ -39,10 +63,25 @@ class MockGMLLM:
                 voice_direction=VoiceDirection(tags=["[slowly]", "[whispers]"]),
             )
 
+        if lower.startswith("gm_script:hidden_roll"):
+            notation = "1d20"
+            m = re.search(r"(\d*)d(\d+)", lower)
+            if m:
+                notation = f"{m.group(1) or '1'}d{m.group(2)}"
+            return LLMTurn(
+                tool_calls=[
+                    {
+                        "name": "roll_dice",
+                        "args": {"notation": notation, "reason": "hidden GM roll"},
+                    }
+                ],
+                narration="",
+            )
+
         if lower.startswith("gm_script:"):
             return self._scripted(action, character_id)
 
-        if context.get("purpose") == "session_opening" or lower.startswith("system:session_opening"):
+        if purpose == "session_opening" or lower.startswith("system:session_opening"):
             from services.play.gm.opening_brief import build_opening_brief
 
             blueprint = context.get("blueprint") or {}
@@ -78,31 +117,12 @@ class MockGMLLM:
                 ),
             )
 
-        if "roll" in lower or "d20" in lower:
-            notation = "1d20"
-            m = re.search(r"(\d*)d(\d+)", lower)
-            if m:
-                notation = f"{m.group(1) or '1'}d{m.group(2)}"
+        if _SKILL_RE.search(lower) and not state.get("pending_check"):
             return LLMTurn(
                 tool_calls=[
                     {
-                        "name": "roll_dice",
-                        "args": {"notation": notation, "reason": action},
-                    }
-                ],
-                narration="",
-            )
-
-        if "check" in lower:
-            skill = "Athletics"
-            m = re.search(r"for ([A-Za-z]+)", action, re.I)
-            if m:
-                skill = m.group(1)
-            return LLMTurn(
-                tool_calls=[
-                    {
-                        "name": "perform_check",
-                        "args": {"skill": skill, "modifier": 0},
+                        "name": "lookup_rules",
+                        "args": {"query": action[:200]},
                     }
                 ],
                 narration="",
@@ -131,8 +151,54 @@ class MockGMLLM:
             narration=f"Around {location}, the table reacts as you: {action}",
         )
 
+    def continue_with_tools(self, context: dict, tool_results: list[dict]) -> LLMTurn:
+        if context.get("purpose") == "roll_resolution":
+            return self.complete_turn(context)
+        if any(tr.get("name") == "lookup_rules" for tr in (tool_results or [])):
+            action = (context.get("player_action") or "").strip()
+            skill = "Athletics"
+            m = re.search(r"for ([A-Za-z]+)", action, re.I)
+            if m:
+                skill = m.group(1)
+            elif re.search(r"climb", action, re.I):
+                skill = "Athletics"
+            elif re.search(r"search|perception", action, re.I):
+                skill = "Perception"
+            elif re.search(r"sneak|stealth|hide", action, re.I):
+                skill = "Stealth"
+            notation = "1d20"
+            m_dice = re.search(r"(\d*)d(\d+)", action.lower())
+            if m_dice:
+                notation = f"{m_dice.group(1) or '1'}d{m_dice.group(2)}"
+            return LLMTurn(
+                tool_calls=[
+                    {
+                        "name": "request_roll",
+                        "args": {
+                            "character_id": context.get("actor_character_id"),
+                            "skill": skill,
+                            "notation": notation,
+                            "dc": 12,
+                            "reason": action,
+                            "success_rule": "meet_or_beat",
+                        },
+                    }
+                ],
+                narration="",
+            )
+        return LLMTurn(tool_calls=[], narration=context.get("pending_narration") or "")
+
     def narrate_after_tools(self, context: dict, tool_results: list[dict]) -> str:
         for tr in tool_results:
+            if tr["name"] == "request_roll" and tr["result"].get("ok"):
+                pending = tr["result"]["result"]
+                skill = pending.get("skill") or "check"
+                notation = pending.get("notation") or "dice"
+                dc = pending.get("dc")
+                who = (context.get("character_name") or "").strip() or "You"
+                dice = f" ({notation})" if notation else ""
+                dc_bit = f" against DC {dc}" if dc is not None else ""
+                return f"{who}, make a {skill} check{dice}{dc_bit}."
             if tr["name"] == "roll_dice" and tr["result"].get("ok"):
                 total = tr["result"]["result"]["total"]
                 return f"The dice settle on {total}."
@@ -140,6 +206,10 @@ class MockGMLLM:
                 total = tr["result"]["result"]["total"]
                 skill = tr["result"]["result"].get("skill")
                 return f"Your {skill} check totals {total}."
+            if tr["name"] == "confirm_roll" and tr["result"].get("ok"):
+                total = tr["result"]["result"]["total"]
+                skill = tr["result"]["result"].get("skill") or "check"
+                return f"The {skill} check settles on {total}."
         return context.get("pending_narration") or "The moment passes."
 
     def _scripted(self, action: str, character_id: str | None) -> LLMTurn:

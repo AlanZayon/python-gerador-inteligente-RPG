@@ -17,7 +17,7 @@ from services.auth import (
     resolve_auth_context,
 )
 from services.play import hub as hub_module
-from services.play.gm import resolve_gm_llm, submit_player_action
+from services.play.gm import resolve_gm_llm, submit_player_action, confirm_roll
 from services.play.sync import SyncError, get_reconnect_snapshot, set_presence
 from services.users import get_or_create_user
 
@@ -117,6 +117,32 @@ def register_session_sockets(app):
                         continue
                     try:
                         submit_player_action(user.id, session_id, text, llm=resolve_gm_llm())
+                    except Exception as exc:  # noqa: BLE001
+                        ws.send(
+                            json.dumps(
+                                {
+                                    "version": 1,
+                                    "type": "error",
+                                    "payload": {
+                                        "code": getattr(exc, "code", "action_failed"),
+                                        "message": str(exc),
+                                    },
+                                }
+                            )
+                        )
+                elif mtype == "confirm_roll":
+                    pending_id = (msg.get("pending_id") or "").strip() or None
+                    chosen_skill = (msg.get("chosen_skill") or "").strip() or None
+                    chosen_index = msg.get("chosen_index")
+                    try:
+                        confirm_roll(
+                            user.id,
+                            session_id,
+                            pending_id=pending_id,
+                            llm=resolve_gm_llm(),
+                            chosen_skill=chosen_skill,
+                            chosen_index=chosen_index,
+                        )
                     except Exception as exc:  # noqa: BLE001
                         ws.send(
                             json.dumps(

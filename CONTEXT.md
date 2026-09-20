@@ -29,8 +29,12 @@ A playable world instance seeded from a completed Job (Blueprint + knowledge han
 _Avoid_: Job (once play has started)
 
 **Campaign State**:
-Mutable runtime truth of what has happened in play (NPC status, quest progress, relationships, inventory/HP if tracked, current scene). Distinct from the Blueprint.
+Mutable runtime truth of what has happened in play (NPC status, quest progress, relationships, inventory/HP if tracked, current scene, pending Roll Call). Distinct from the Blueprint.
 _Avoid_: Blueprint, World State (prefer this term unless a narrower synonym is needed)
+
+**Roll Call**:
+A GM-issued request that a specific Character confirm a check. It lives in Campaign State until resolved. The server owns the RNG; the Player only authorizes the roll. A Roll Call may offer alternative checks; the Player chooses one, then the server resolves.
+_Avoid_: player dice, client RNG, treating confirmation as the result
 
 **GameSession**:
 A live multiplayer room for a Campaign (lobby → active → ended), with invite and presence.
@@ -62,7 +66,7 @@ The application loop that turns player intent + Blueprint + Campaign State + mem
 _Avoid_: chatbot, LLM alone as source of truth
 
 **GM Tool**:
-A server-side capability the GM agent may invoke (dice, state updates, retrieval). Results are authoritative; the model does not invent dice/HP outcomes when a tool exists.
+A server-side capability the GM agent may invoke (rules lookup, Roll Call, dice, state updates). Results are authoritative; the model does not invent dice/HP outcomes when a tool exists.
 
 ### Voice
 

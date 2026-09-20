@@ -169,7 +169,7 @@ def test_two_connection_lifecycles_receive_broadcast_and_resync(live_table):
     submit_player_action(
         live_table["host"].id,
         live_table["session_id"],
-        "I roll a d20.",
+        "GM_SCRIPT:hidden_roll 1d20",
         llm=MockGMLLM(),
         dice_rng=lambda sides: 11,
     )
