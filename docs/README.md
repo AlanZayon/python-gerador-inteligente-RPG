@@ -4,9 +4,12 @@ Backend que transforma **PDFs de livros de regras de RPG** em campanhas jogávei
 
 ## Site interativo
 
-**[Abrir documentação live](https://cdn.jsdelivr.net/gh/AlanZayon/python-gerador-inteligente-RPG@main/docs/site/index.html)** — PT/EN, busca ⌘K, TOC, diagramas Mermaid, capítulos de Play/GM.
+**[Abrir documentação live](https://raw.githack.com/AlanZayon/python-gerador-inteligente-RPG/main/docs/site/index.html)** — PT/EN, busca ⌘K, TOC, diagramas Mermaid, capítulos de Play/GM.
 
-No GitHub, um link para `site/index.html` só mostra o código-fonte. O URL acima serve o HTML e deixa interagir.
+URL estável (depois de ativar Pages → GitHub Actions):  
+https://alanzayon.github.io/python-gerador-inteligente-RPG/site/
+
+No GitHub, um link para `site/index.html` só mostra o código-fonte — não uses esse caminho.
 
 Local (opcional):
 

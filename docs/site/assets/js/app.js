@@ -12,7 +12,7 @@
 
   /** Live CDN mirror of docs/ — used when opening index.html via file:// */
   const REPO_DOCS_CDN =
-    "https://cdn.jsdelivr.net/gh/AlanZayon/python-gerador-inteligente-RPG@main/docs/";
+    "https://raw.githack.com/AlanZayon/python-gerador-inteligente-RPG/main/docs/";
   const REPO_BLOB =
     "https://github.com/AlanZayon/python-gerador-inteligente-RPG/blob/main/docs/";
 
