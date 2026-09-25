@@ -35,11 +35,38 @@ def build_gm_query(
     character_name: str = "",
     system_preset: str | None = None,
 ) -> str:
+    action = (player_action or "").strip()
+    lower = action.lower()
+    combatish = any(
+        kw in lower
+        for kw in (
+            "attack",
+            "combat",
+            "fight",
+            "initiative",
+            "strike",
+            "shoot",
+            "damage",
+            "hit",
+            "ataque",
+            "combate",
+            "luta",
+            "iniciativa",
+            "dano",
+            "ferir",
+            "golpe",
+        )
+    )
     parts = [
         mechanics_query_for_preset(system_preset),
         "RPG rules, checks, difficulty, and when to call for a roll.",
-        f"Player action: {(player_action or '').strip()[:300]}",
     ]
+    if combatish:
+        parts.append(
+            "combat initiative attack damage defense armor hit points "
+            "conditions wounds turn order"
+        )
+    parts.append(f"Player action: {action[:300]}")
     if scene:
         parts.append(f"Current scene: {scene}")
     if location:

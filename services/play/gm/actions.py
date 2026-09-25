@@ -83,6 +83,20 @@ def _enqueue(session_id: str, slot: dict[str, Any]) -> dict:
     return slot["result"]
 
 
+def _active_combat(session_id: str) -> dict | None:
+    db = SessionLocal()
+    try:
+        gs = db.query(GameSession).filter(GameSession.id == session_id).first()
+        if not gs:
+            return None
+        combat = load_state(gs.state_json).get("combat")
+        if isinstance(combat, dict) and combat.get("status") == "active":
+            return combat
+        return None
+    finally:
+        db.close()
+
+
 def _process_slot(session_id: str, slot: dict[str, Any]) -> dict:
     character_id = _validate_actor(slot["user_id"], session_id)
     kind = slot.get("kind") or "action"
@@ -125,6 +139,17 @@ def _process_slot(session_id: str, slot: dict[str, Any]) -> dict:
             "awaiting_roll",
             "A Roll Call is pending; the targeted player must confirm it first.",
         )
+
+    from services.play.gm.combat import character_in_combat, character_is_current_turn
+
+    combat = _active_combat(session_id)
+    if combat and character_in_combat({"combat": combat}, character_id):
+        if not character_is_current_turn({"combat": combat}, character_id):
+            raise ActionError(
+                "not_your_turn",
+                "It is not your turn in the Combat Encounter.",
+            )
+
     return run_gm_flight(
         session_id,
         slot["user_id"],

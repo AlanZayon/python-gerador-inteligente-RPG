@@ -37,6 +37,7 @@ def _error(exc: SessionError | ActionError | SyncError):
         "rate_limited": 429,
         "awaiting_roll": 409,
         "needs_choice": 409,
+        "not_your_turn": 409,
     }.get(exc.code, 400)
     return jsonify({"error": exc.code, "message": exc.message}), status
 

@@ -195,6 +195,12 @@ class LiveGMLLM:
             "Never write stage directions such as 'waiting for the player', "
             "'aguardando a rolagem', asterisks, or parenthetical asides about waiting. "
             "Hidden GM/NPC rolls may use roll_dice immediately. "
+            "Light Combat Encounter tracker: when a fight starts, call lookup_rules "
+            "for initiative/attack/damage procedures from the uploaded book, then "
+            "begin_combat. Set initiative with set_combatant_initiative using server "
+            "dice totals. Narrate whose turn it is from campaign_state.combat. "
+            "After a resolved beat call next_turn. Never invent HP — use apply_harm "
+            "or apply_heal after dice. Call end_combat when the fight ends. "
             "Keep public narration concise and in-world. "
             "Do not decide a PC's voluntary actions. "
             "Never narrate your planning ('I am reading…', 'I'll prepare…') — "
@@ -245,6 +251,8 @@ class LiveGMLLM:
                 "pending_check": state.get("pending_check"),
                 "clocks": state.get("clocks"),
                 "npc_flags": state.get("npc_flags"),
+                "characters": state.get("characters") or {},
+                "combat": state.get("combat"),
             },
             "resolved_roll": context.get("resolved_roll"),
             "blueprint_title": brief.get("title") or blueprint.get("title"),

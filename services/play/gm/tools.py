@@ -96,6 +96,71 @@ TOOL_SPECS = [
             "character_id": "string optional for character_private",
         },
     },
+    {
+        "name": "begin_combat",
+        "description": (
+            "Start a light Combat Encounter tracker. Pass NPCs as a list of "
+            "{name, side, hp, max_hp}. Party PCs are added automatically when "
+            "claimed. Call lookup_rules for initiative/attack procedures first. "
+            "Does not roll dice or resolve hits."
+        ),
+        "parameters": {
+            "npcs": "optional list of {name, side, hp, max_hp, notes}",
+            "reason": "string optional why combat starts",
+        },
+    },
+    {
+        "name": "set_combatant_initiative",
+        "description": (
+            "Set initiative for one combatant after a roll. Use the server "
+            "dice total — do not invent the number."
+        ),
+        "parameters": {
+            "combatant_id": "string combatant id, character_id, or name",
+            "initiative": "number initiative value",
+        },
+    },
+    {
+        "name": "next_turn",
+        "description": "Advance to the next combatant in initiative order; bump round when wrapping.",
+        "parameters": {"summary": "string optional beat summary for the combat log"},
+    },
+    {
+        "name": "apply_harm",
+        "description": (
+            "Apply harm after authoritative dice. Subtract from hp or add to a "
+            "named resource. Do not invent amounts — use the rolled total."
+        ),
+        "parameters": {
+            "combatant_id": "string combatant id, character_id, or name",
+            "amount": "int harm amount",
+            "resource": "optional resource key instead of hp",
+            "summary": "string optional",
+        },
+    },
+    {
+        "name": "apply_heal",
+        "description": "Heal hp or reduce a named resource after authoritative dice.",
+        "parameters": {
+            "combatant_id": "string combatant id, character_id, or name",
+            "amount": "int heal amount",
+            "resource": "optional resource key instead of hp",
+            "summary": "string optional",
+        },
+    },
+    {
+        "name": "update_combatant",
+        "description": "Patch combatant status tags, notes, or resources (not a substitute for apply_harm).",
+        "parameters": {
+            "combatant_id": "string combatant id, character_id, or name",
+            "fields": "object with status, notes, resources, side",
+        },
+    },
+    {
+        "name": "end_combat",
+        "description": "End the Combat Encounter and clear the tracker from Campaign State.",
+        "parameters": {"summary": "string optional outcome summary"},
+    },
 ]
 
 TOOL_NAMES = {spec["name"] for spec in TOOL_SPECS}
@@ -661,8 +726,267 @@ def execute_tool(ctx: ToolContext, name: str, args: dict) -> dict:
             out = {"ok": True, "result": mem}
         except MemoryError as exc:
             out = {"ok": False, "error": exc.message}
+    elif name == "begin_combat":
+        out = _tool_begin_combat(ctx, args)
+    elif name == "set_combatant_initiative":
+        out = _tool_set_initiative(ctx, args)
+    elif name == "next_turn":
+        out = _tool_next_turn(ctx, args)
+    elif name == "apply_harm":
+        out = _tool_apply_harm(ctx, args, heal=False)
+    elif name == "apply_heal":
+        out = _tool_apply_harm(ctx, args, heal=True)
+    elif name == "update_combatant":
+        out = _tool_update_combatant(ctx, args)
+    elif name == "end_combat":
+        out = _tool_end_combat(ctx, args)
     else:
         out = {"ok": False, "error": f"unknown tool {name}"}
 
     ctx.tool_results.append({"name": name, "args": args, "result": out})
     return out
+
+
+def _tool_begin_combat(ctx: ToolContext, args: dict) -> dict:
+    from services.play.gm.combat import append_combat_log, empty_combatant, parse_jsonish
+
+    if isinstance(ctx.state.get("combat"), dict) and ctx.state["combat"].get("status") == "active":
+        return {"ok": False, "error": "a Combat Encounter is already active"}
+
+    combatants: list[dict] = []
+    seated = (
+        ctx.db.query(SessionPlayer)
+        .filter(SessionPlayer.game_session_id == ctx.gs.id)
+        .all()
+    )
+    for sp in seated:
+        if not sp.character_id:
+            continue
+        char = (
+            ctx.db.query(CampaignCharacter)
+            .filter(CampaignCharacter.id == sp.character_id)
+            .first()
+        )
+        name = char.display_name if char else "Hero"
+        bucket = (ctx.state.get("characters") or {}).get(sp.character_id) or {}
+        hp = bucket.get("hp")
+        max_hp = bucket.get("max_hp", hp)
+        combatants.append(
+            empty_combatant(
+                name=name,
+                kind="pc",
+                character_id=sp.character_id,
+                side="party",
+                hp=_optional_int(hp),
+                max_hp=_optional_int(max_hp),
+            )
+        )
+
+    npcs = parse_jsonish(args.get("npcs"), default=[]) or []
+    if isinstance(npcs, dict):
+        npcs = [npcs]
+    if not isinstance(npcs, list):
+        npcs = []
+    for raw in npcs:
+        if isinstance(raw, str):
+            combatants.append(empty_combatant(name=raw, kind="npc", side="opposition"))
+            continue
+        if not isinstance(raw, dict):
+            continue
+        combatants.append(
+            empty_combatant(
+                name=(raw.get("name") or "Enemy").strip() or "Enemy",
+                kind="npc",
+                side=(raw.get("side") or "opposition"),
+                hp=_optional_int(raw.get("hp")),
+                max_hp=_optional_int(raw.get("max_hp")),
+                notes=(raw.get("notes") or "")[:240],
+            )
+        )
+
+    if not combatants:
+        return {"ok": False, "error": "no combatants to start combat"}
+
+    combat = {
+        "id": str(uuid.uuid4()),
+        "status": "active",
+        "round": 1,
+        "turn_index": 0,
+        "combatants": combatants,
+        "log": [],
+    }
+    reason = (args.get("reason") or "").strip()
+    if reason:
+        append_combat_log(combat, reason, actor="gm")
+    ctx.state["combat"] = combat
+    ctx.append_event("combat_started", combat)
+    ctx.persist_state()
+    return {"ok": True, "result": combat}
+
+
+def _tool_set_initiative(ctx: ToolContext, args: dict) -> dict:
+    from services.play.gm.combat import find_combatant, ordered_combatants
+
+    combat = ctx.state.get("combat")
+    if not isinstance(combat, dict) or combat.get("status") != "active":
+        return {"ok": False, "error": "no active Combat Encounter"}
+    combatant = find_combatant(combat, args.get("combatant_id") or args.get("name"))
+    if not combatant:
+        return {"ok": False, "error": "combatant not found"}
+    init = args.get("initiative")
+    try:
+        combatant["initiative"] = float(init) if init is not None and init != "" else None
+        if combatant["initiative"] is not None and combatant["initiative"] == int(combatant["initiative"]):
+            combatant["initiative"] = int(combatant["initiative"])
+    except (TypeError, ValueError):
+        return {"ok": False, "error": "initiative must be a number"}
+    # Reset turn pointer to start of ordered list after initiatives change
+    ordered = ordered_combatants(combat)
+    combat["combatants"] = ordered
+    combat["turn_index"] = 0
+    ctx.append_event(
+        "combatant_updated",
+        {"combatant_id": combatant["id"], "fields": {"initiative": combatant["initiative"]}},
+        target_id=combatant.get("character_id"),
+    )
+    ctx.persist_state()
+    return {"ok": True, "result": combatant}
+
+
+def _tool_next_turn(ctx: ToolContext, args: dict) -> dict:
+    from services.play.gm.combat import append_combat_log, current_combatant, ordered_combatants
+
+    combat = ctx.state.get("combat")
+    if not isinstance(combat, dict) or combat.get("status") != "active":
+        return {"ok": False, "error": "no active Combat Encounter"}
+    ordered = ordered_combatants(combat)
+    if not ordered:
+        return {"ok": False, "error": "no combatants"}
+    combat["combatants"] = ordered
+    prev = current_combatant(combat)
+    summary = (args.get("summary") or "").strip()
+    if summary:
+        append_combat_log(combat, summary, actor=(prev or {}).get("name") or "")
+    nxt = (int(combat.get("turn_index") or 0) + 1) % len(ordered)
+    if nxt == 0:
+        combat["round"] = int(combat.get("round") or 1) + 1
+    combat["turn_index"] = nxt
+    current = ordered[nxt]
+    payload = {
+        "round": combat["round"],
+        "turn_index": combat["turn_index"],
+        "combatant": current,
+    }
+    ctx.append_event("combat_turn", payload, target_id=current.get("character_id"))
+    ctx.persist_state()
+    return {"ok": True, "result": payload}
+
+
+def _tool_apply_harm(ctx: ToolContext, args: dict, *, heal: bool) -> dict:
+    from services.play.gm.combat import append_combat_log, find_combatant
+
+    combat = ctx.state.get("combat")
+    if not isinstance(combat, dict) or combat.get("status") != "active":
+        return {"ok": False, "error": "no active Combat Encounter"}
+    combatant = find_combatant(combat, args.get("combatant_id") or args.get("name"))
+    if not combatant:
+        return {"ok": False, "error": "combatant not found"}
+    amount = _optional_int(args.get("amount"))
+    if amount is None or amount < 0:
+        return {"ok": False, "error": "amount must be a non-negative int"}
+    resource = (args.get("resource") or "").strip()
+    if resource:
+        resources = combatant.setdefault("resources", {})
+        current = _optional_int(resources.get(resource)) or 0
+        resources[resource] = max(0, current - amount) if heal else current + amount
+        field_patch = {"resources": {resource: resources[resource]}}
+    else:
+        current = _optional_int(combatant.get("hp"))
+        if current is None:
+            current = 0
+        if heal:
+            new_hp = current + amount
+            max_hp = _optional_int(combatant.get("max_hp"))
+            if max_hp is not None:
+                new_hp = min(new_hp, max_hp)
+        else:
+            new_hp = max(0, current - amount)
+        combatant["hp"] = new_hp
+        field_patch = {"hp": new_hp}
+        char_id = combatant.get("character_id")
+        if char_id:
+            bucket = ctx.state.setdefault("characters", {}).setdefault(char_id, {})
+            bucket["hp"] = new_hp
+            if combatant.get("max_hp") is not None:
+                bucket["max_hp"] = combatant["max_hp"]
+    summary = (args.get("summary") or "").strip()
+    verb = "healed" if heal else "harmed"
+    append_combat_log(
+        combat,
+        summary or f"{combatant.get('name')} {verb} by {amount}",
+        actor=combatant.get("name") or "",
+    )
+    ctx.append_event(
+        "combatant_updated",
+        {"combatant_id": combatant["id"], "fields": field_patch, "heal": heal, "amount": amount},
+        target_id=combatant.get("character_id"),
+    )
+    ctx.persist_state()
+    return {"ok": True, "result": combatant}
+
+
+def _tool_update_combatant(ctx: ToolContext, args: dict) -> dict:
+    from services.play.gm.combat import find_combatant, parse_jsonish
+
+    combat = ctx.state.get("combat")
+    if not isinstance(combat, dict) or combat.get("status") != "active":
+        return {"ok": False, "error": "no active Combat Encounter"}
+    combatant = find_combatant(combat, args.get("combatant_id") or args.get("name"))
+    if not combatant:
+        return {"ok": False, "error": "combatant not found"}
+    fields = parse_jsonish(args.get("fields"), default={}) or {}
+    if not isinstance(fields, dict):
+        fields = {}
+    patched = {}
+    if "notes" in fields and isinstance(fields["notes"], str):
+        combatant["notes"] = fields["notes"][:240]
+        patched["notes"] = combatant["notes"]
+    if "side" in fields and fields["side"] in {"party", "opposition", "neutral"}:
+        combatant["side"] = fields["side"]
+        patched["side"] = combatant["side"]
+    if "status" in fields:
+        status = fields["status"]
+        if isinstance(status, str):
+            status = [status]
+        if isinstance(status, list):
+            combatant["status"] = [str(s)[:40] for s in status][:12]
+            patched["status"] = combatant["status"]
+    if "resources" in fields and isinstance(fields["resources"], dict):
+        combatant.setdefault("resources", {}).update(fields["resources"])
+        patched["resources"] = combatant["resources"]
+    ctx.append_event(
+        "combatant_updated",
+        {"combatant_id": combatant["id"], "fields": patched},
+        target_id=combatant.get("character_id"),
+    )
+    ctx.persist_state()
+    return {"ok": True, "result": combatant}
+
+
+def _tool_end_combat(ctx: ToolContext, args: dict) -> dict:
+    from services.play.gm.combat import append_combat_log
+
+    combat = ctx.state.get("combat")
+    if not isinstance(combat, dict) or combat.get("status") != "active":
+        return {"ok": False, "error": "no active Combat Encounter"}
+    summary = (args.get("summary") or "").strip()
+    if summary:
+        append_combat_log(combat, summary, actor="gm")
+    snapshot = {**combat, "status": "ended"}
+    ctx.append_event("combat_ended", snapshot)
+    ctx.state["combat"] = None
+    if summary:
+        notes = ctx.state.setdefault("notes", [])
+        notes.append(f"Combat ended: {summary}"[:240])
+    ctx.persist_state()
+    return {"ok": True, "result": snapshot}

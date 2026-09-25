@@ -29,11 +29,19 @@ A playable world instance seeded from a completed Job (Blueprint + knowledge han
 _Avoid_: Job (once play has started)
 
 **Campaign State**:
-Mutable runtime truth of what has happened in play (NPC status, quest progress, relationships, inventory/HP if tracked, current scene, pending Roll Call). Distinct from the Blueprint.
+Mutable runtime truth of what has happened in play (NPC status, quest progress, relationships, inventory/HP if tracked, current scene, pending Roll Call, active Combat Encounter). Distinct from the Blueprint.
 _Avoid_: Blueprint, World State (prefer this term unless a narrower synonym is needed)
 
+**Combat Encounter**:
+An active fight tracked in Campaign State: combatants, initiative order, turn pointer, and optional resources (HP, status tags). Procedures (how to roll initiative, attack, damage) come from the uploaded BookIndex via `lookup_rules` — not from a compiled rules engine. Distinct from Blueprint manuscript “Combat:” sections.
+_Avoid_: combat engine, VTT encounter, treating narration alone as HP authority
+
+**Combatant**:
+A PC or NPC row inside a Combat Encounter (name, side, initiative, optional hp/max_hp, resources, status). PCs link to a claimed Character; NPCs live only in the encounter.
+_Avoid_: Character (for NPCs), Player
+
 **Roll Call**:
-A GM-issued request that a specific Character confirm a check. It lives in Campaign State until resolved. The server owns the RNG; the Player only authorizes the roll. A Roll Call may offer alternative checks; the Player chooses one, then the server resolves.
+A GM-issued request that a specific Character confirm a check. It lives in Campaign State until resolved. The server owns the RNG; the Player only authorizes the roll. A Roll Call may offer alternative checks; the Player chooses one, then the server resolves. Used for PC combat rolls as well as exploration checks.
 _Avoid_: player dice, client RNG, treating confirmation as the result
 
 **GameSession**:

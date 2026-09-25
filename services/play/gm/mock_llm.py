@@ -78,6 +78,59 @@ class MockGMLLM:
                 narration="",
             )
 
+        if lower.startswith("gm_script:begin_combat"):
+            return LLMTurn(
+                tool_calls=[
+                    {
+                        "name": "lookup_rules",
+                        "args": {"query": "combat initiative attack damage"},
+                    }
+                ],
+                narration="",
+            )
+
+        if lower.startswith("gm_script:set_init"):
+            # GM_SCRIPT:set_init <combatant_id_or_name> <value>
+            parts = action.split()
+            target = parts[1] if len(parts) > 1 else ""
+            value = parts[2] if len(parts) > 2 else "10"
+            return LLMTurn(
+                tool_calls=[
+                    {
+                        "name": "set_combatant_initiative",
+                        "args": {"combatant_id": target, "initiative": value},
+                    }
+                ],
+                narration=f"Initiative set for {target}.",
+            )
+
+        if lower.startswith("gm_script:next_turn"):
+            return LLMTurn(
+                tool_calls=[{"name": "next_turn", "args": {"summary": "beat resolved"}}],
+                narration="The turn passes.",
+            )
+
+        if lower.startswith("gm_script:harm"):
+            # GM_SCRIPT:harm <target> <amount>
+            parts = action.split()
+            target = parts[1] if len(parts) > 1 else ""
+            amount = parts[2] if len(parts) > 2 else "1"
+            return LLMTurn(
+                tool_calls=[
+                    {
+                        "name": "apply_harm",
+                        "args": {"combatant_id": target, "amount": amount, "summary": "strike"},
+                    }
+                ],
+                narration=f"A blow lands on {target}.",
+            )
+
+        if lower.startswith("gm_script:end_combat"):
+            return LLMTurn(
+                tool_calls=[{"name": "end_combat", "args": {"summary": "foes fall"}}],
+                narration="The fight ends.",
+            )
+
         if lower.startswith("gm_script:"):
             return self._scripted(action, character_id)
 
@@ -154,8 +207,28 @@ class MockGMLLM:
     def continue_with_tools(self, context: dict, tool_results: list[dict]) -> LLMTurn:
         if context.get("purpose") == "roll_resolution":
             return self.complete_turn(context)
+        action = (context.get("player_action") or "").strip()
+        if action.lower().startswith("gm_script:begin_combat"):
+            return LLMTurn(
+                tool_calls=[
+                    {
+                        "name": "begin_combat",
+                        "args": {
+                            "reason": "Ambush",
+                            "npcs": [
+                                {
+                                    "name": "Bandit",
+                                    "side": "opposition",
+                                    "hp": 10,
+                                    "max_hp": 10,
+                                }
+                            ],
+                        },
+                    }
+                ],
+                narration="Steel flashes — combat begins!",
+            )
         if any(tr.get("name") == "lookup_rules" for tr in (tool_results or [])):
-            action = (context.get("player_action") or "").strip()
             skill = "Athletics"
             m = re.search(r"for ([A-Za-z]+)", action, re.I)
             if m:
@@ -210,6 +283,16 @@ class MockGMLLM:
                 total = tr["result"]["result"]["total"]
                 skill = tr["result"]["result"].get("skill") or "check"
                 return f"The {skill} check settles on {total}."
+            if tr["name"] == "begin_combat" and tr["result"].get("ok"):
+                return "Steel flashes — combat begins!"
+            if tr["name"] == "apply_harm" and tr["result"].get("ok"):
+                c = tr["result"]["result"]
+                return f"{c.get('name')} is down to {c.get('hp')} HP."
+            if tr["name"] == "end_combat" and tr["result"].get("ok"):
+                return "The fight ends."
+            if tr["name"] == "next_turn" and tr["result"].get("ok"):
+                c = (tr["result"]["result"] or {}).get("combatant") or {}
+                return f"It is {c.get('name')}'s turn."
         return context.get("pending_narration") or "The moment passes."
 
     def _scripted(self, action: str, character_id: str | None) -> LLMTurn:

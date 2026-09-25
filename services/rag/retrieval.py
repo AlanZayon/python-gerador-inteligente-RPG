@@ -19,7 +19,10 @@ _MECHANICS_QUERIES = {
         "Call of Cthulhu sanity investigation skills percentiles clues horror "
         "occupation"
     ),
-    "generic": "RPG game mechanics combat skills magic rules checks difficulty",
+    "generic": (
+        "RPG game mechanics combat skills magic rules checks difficulty "
+        "initiative attack damage defense hit points conditions turn order"
+    ),
     "gurps": (
         "GURPS attributes ST DX IQ HT skills advantages disadvantages 3d6 "
         "character points success rolls modifiers"

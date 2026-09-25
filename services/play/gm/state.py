@@ -16,6 +16,7 @@ EMPTY_STATE = {
     "pending_check": None,
     "quests": {},
     "characters": {},
+    "combat": None,
 }
 
 
