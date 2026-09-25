@@ -28,7 +28,7 @@ window.DOCS_CONTENT = {
       notFound: "Página não encontrada.",
       fetchError: "Não foi possível carregar este capítulo. Serve o repositório com um servidor HTTP local.",
       serveHint:
-        "Na raiz do repo: python -m http.server 8080 → http://localhost:8080/docs/site/",
+        "Abra o site live no README, ou na raiz: python -m http.server 8080 → /docs/site/",
       billingCallout:
         "Billing, créditos e Stripe estão fora do âmbito do produto portfolio (ADR 0004). Endpoints ainda listados no capítulo API são legado.",
       sections: {
@@ -58,7 +58,7 @@ window.DOCS_CONTENT = {
       fetchError:
         "Could not load this chapter. Serve the repository with a local HTTP server.",
       serveHint:
-        "From the repo root: python -m http.server 8080 → http://localhost:8080/docs/site/",
+        "Open the live site from the README, or from the repo root: python -m http.server 8080 → /docs/site/",
       billingCallout:
         "Billing, credits, and Stripe are out of scope for the portfolio product (ADR 0004). Endpoints still listed in the API chapter are legacy.",
       sections: {

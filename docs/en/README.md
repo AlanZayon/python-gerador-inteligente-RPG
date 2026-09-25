@@ -96,7 +96,7 @@ flowchart TD
 
 Each chapter footer: **Previous · Index · Next**.
 
-**Interactive site:** [docs/site/](../site/index.html) (PT/EN, search, TOC).
+**Interactive site:** [open live](https://cdn.jsdelivr.net/gh/AlanZayon/python-gerador-inteligente-RPG@main/docs/site/index.html#/en/overview) (PT/EN, search, TOC).
 
 ---
 

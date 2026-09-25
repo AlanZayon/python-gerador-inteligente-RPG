@@ -96,7 +96,7 @@ flowchart TD
 
 Navegação em cada capítulo: **Anterior · Índice · Seguinte** no rodapé.
 
-**Site interativo:** [docs/site/](../site/index.html) (PT/EN, busca, TOC).
+**Site interativo:** [abrir live](https://cdn.jsdelivr.net/gh/AlanZayon/python-gerador-inteligente-RPG@main/docs/site/index.html#/pt/overview) (PT/EN, busca, TOC).
 
 ---
 

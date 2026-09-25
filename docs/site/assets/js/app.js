@@ -10,8 +10,19 @@
     return;
   }
 
-  /** docs/{lang}/*.md live one level above /docs/site/ */
-  const MD_BASE = "../";
+  /** Live CDN mirror of docs/ — used when opening index.html via file:// */
+  const REPO_DOCS_CDN =
+    "https://cdn.jsdelivr.net/gh/AlanZayon/python-gerador-inteligente-RPG@main/docs/";
+  const REPO_BLOB =
+    "https://github.com/AlanZayon/python-gerador-inteligente-RPG/blob/main/docs/";
+
+  /** Resolve docs/ relative to this page, or CDN when file:// blocks local fetch. */
+  function docsContentBase() {
+    if (location.protocol === "file:") {
+      return REPO_DOCS_CDN;
+    }
+    return new URL("../", location.href).href;
+  }
 
   const els = {
     article: document.getElementById("article"),
@@ -81,11 +92,11 @@
   }
 
   function mdUrl(lang, file) {
-    return `${MD_BASE}${lang}/${file}`;
+    return new URL(`${lang}/${file}`, docsContentBase()).href;
   }
 
   function githubMdPath(lang, file) {
-    return `../${lang}/${file}`;
+    return `${REPO_BLOB}${lang}/${file}`;
   }
 
   function stripNavFooters(md) {

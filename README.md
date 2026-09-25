@@ -14,10 +14,14 @@ HTTP client → Flask API → Redis queue → worker.py → S3 + 9router
 - **Worker** (`worker.py`) — consumes priority/standard queues, runs pipeline
 - **Tasks** (`tasks/campaign_tasks.py`) — PDF → RAG → plan/write/revise → Markdown → S3
 
-**Documentation (interactive):** [docs/site/index.html](docs/site/index.html) — PT/EN, search, sidebar, Play/GM chapters.
+**Documentation (interactive):** [Open the live docs site](https://cdn.jsdelivr.net/gh/AlanZayon/python-gerador-inteligente-RPG@main/docs/site/index.html) — PT/EN, search, sidebar, Play/GM chapters.
+
+> GitHub only shows the HTML source for in-repo `.html` files. Use the link above to actually run the site.
+
+Local mirror (optional):
 
 ```bash
-# from the repo root (file:// cannot fetch Markdown)
+# from the repo root
 python -m http.server 8080
 # open http://localhost:8080/docs/site/
 ```
