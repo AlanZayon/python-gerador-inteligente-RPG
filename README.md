@@ -14,10 +14,9 @@ HTTP client → Flask API → Redis queue → worker.py → S3 + 9router
 - **Worker** (`worker.py`) — consumes priority/standard queues, runs pipeline
 - **Tasks** (`tasks/campaign_tasks.py`) — PDF → RAG → plan/write/revise → Markdown → S3
 
-**Documentation (interactive):** [Open the live docs site](https://raw.githack.com/AlanZayon/python-gerador-inteligente-RPG/main/docs/site/index.html) — PT/EN, search, sidebar, Play/GM chapters.
-
-After GitHub Pages is enabled (Settings → Pages → Source: **GitHub Actions**), the stable URL will be:  
-https://alanzayon.github.io/python-gerador-inteligente-RPG/site/
+**Documentation (interactive):**
+- **Live now:** [raw.githack](https://raw.githack.com/AlanZayon/python-gerador-inteligente-RPG/main/docs/site/index.html)
+- **GitHub Pages** (after the Deploy docs workflow succeeds): https://alanzayon.github.io/python-gerador-inteligente-RPG/site/
 
 > Do not open `docs/site/index.html` on github.com — that page only shows source code.
 
