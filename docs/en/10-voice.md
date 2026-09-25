@@ -1,6 +1,6 @@
 # 10. Voice (STT / TTS)
 
-[← Operations](06-operations.md) · [Index](README.md)
+[← Operations](06-operations.md) · [Index](README.md) · [Next: Play →](11-play-overview.md)
 
 ---
 

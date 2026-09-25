@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="pt">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta
+      name="description"
+      content="Arcane Forge — documentação do backend AI Game Master: geração de campanhas, RAG, pipeline, Play e GM Runtime."
+    />
+    <title>Arcane Forge — Docs</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,650;9..144,700&family=JetBrains+Mono:wght@400;500&family=Source+Sans+3:ital,wght@0,400;0,500;0,600;0,700;1,400&display=swap"
+      rel="stylesheet"
+    />
+    <link
+      rel="stylesheet"
+      href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github.min.css"
+    />
+    <link rel="stylesheet" href="assets/css/site.css" />
+  </head>
+  <body>
+    <a class="skip-link" href="#doc-main">Skip to content</a>
+
+    <header class="topbar">
+      <div class="topbar__inner">
+        <button
+          type="button"
+          class="icon-btn topbar__menu"
+          id="btn-menu"
+          aria-label="Menu"
+          aria-controls="sidebar"
+          aria-expanded="false"
+        >
+          <span class="icon-btn__bars" aria-hidden="true"></span>
+        </button>
+
+        <a class="brand" href="#/pt/overview" id="brand-link">
+          <span class="brand__mark" aria-hidden="true"></span>
+          <span class="brand__text">
+            <span class="brand__name" id="brand-name">Arcane Forge</span>
+            <span class="brand__tag" id="brand-tag">AI Game Master</span>
+          </span>
+        </a>
+
+        <div class="topbar__actions">
+          <button type="button" class="search-trigger" id="btn-search" aria-label="Search">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <circle cx="11" cy="11" r="7" stroke="currentColor" stroke-width="2" />
+              <path d="M20 20l-3.5-3.5" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+            </svg>
+            <span class="search-trigger__label" id="search-label">Buscar…</span>
+            <kbd class="search-trigger__kbd" id="search-kbd">⌘K</kbd>
+          </button>
+
+          <div class="lang-switch" role="group" aria-label="Language">
+            <button type="button" class="lang-switch__btn" data-lang="pt" id="lang-pt">PT</button>
+            <button type="button" class="lang-switch__btn" data-lang="en" id="lang-en">EN</button>
+          </div>
+        </div>
+      </div>
+    </header>
+
+    <div class="shell">
+      <aside class="sidebar" id="sidebar" aria-label="Documentation">
+        <nav class="sidebar__nav" id="sidebar-nav"></nav>
+      </aside>
+
+      <div class="sidebar-backdrop" id="sidebar-backdrop" hidden></div>
+
+      <main class="main" id="doc-main">
+        <div class="main__inner">
+          <article class="article" id="article">
+            <p class="article__loading" id="article-loading">A carregar…</p>
+          </article>
+          <nav class="pager" id="pager" aria-label="Chapter navigation"></nav>
+        </div>
+      </main>
+
+      <aside class="toc" id="toc" aria-label="On this page">
+        <p class="toc__title" id="toc-title">Nesta página</p>
+        <nav class="toc__nav" id="toc-nav"></nav>
+      </aside>
+    </div>
+
+    <div class="search-modal" id="search-modal" hidden>
+      <div class="search-modal__backdrop" id="search-backdrop"></div>
+      <div
+        class="search-modal__panel"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="search-dialog-title"
+      >
+        <h2 class="visually-hidden" id="search-dialog-title">Search</h2>
+        <input
+          type="search"
+          class="search-modal__input"
+          id="search-input"
+          autocomplete="off"
+          spellcheck="false"
+          placeholder="Buscar na documentação…"
+        />
+        <ul class="search-modal__results" id="search-results" role="listbox"></ul>
+        <p class="search-modal__empty" id="search-empty" hidden>Nenhum resultado.</p>
+      </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/marked@12.0.2/marked.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@10.9.1/dist/mermaid.min.js"></script>
+    <script src="assets/js/content-map.js"></script>
+    <script src="assets/js/app.js"></script>
+  </body>
+</html>

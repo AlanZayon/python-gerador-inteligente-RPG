@@ -1,6 +1,6 @@
 # 9. Glossário
 
-[← Limites](08-limites.md) · [Índice](README.md)
+[← Limites](08-limites.md) · [Índice](README.md) · [Play →](11-play-overview.md)
 
 ---
 
@@ -22,7 +22,21 @@
 | **Ack** | `LREM` do job em `rpg:processing_jobs` após sucesso ou falha terminal |
 | **Voice Director** | Transforma a narração da mesa em input de TTS (speaker, Audio Tags); não conhece regras |
 | **Voice Profile** | Nome do speaker → `voice_id` ElevenLabs |
+| **Campaign Blueprint** | Desenho durável da campanha (plano JSON); copiado para a Campaign na criação |
+| **Campaign** | Instância jogável criada a partir de um Job completed |
+| **Campaign State** | Verdade mutável em play (cena, flags, Roll Call, combate) — distinto do Blueprint |
+| **GameSession** | Sala multiplayer ao vivo (lobby → active → ended) |
+| **Player** | Assento na mesa (User + Character opcional) |
+| **Character** | PC do roster; reclamado no lobby |
+| **Roll Call** | Pedido GM de confirmação de check; RNG no servidor após o Player autorizar |
+| **Combat Encounter** | Tracker leve de combate no Campaign State |
+| **Combatant** | Linha PC/NPC no encounter (não confundir Character com NPC) |
+| **Game Master Runtime** | Loop intenção → tools → narração → estado |
+| **GM Tool** | Capacidade server-side invocável pelo agente GM |
+| **BookIndex** | Identidade indexada do livro (`book_id`, embeddings) usada em play via `lookup_rules` |
+
+Play: [visão geral](11-play-overview.md) · [GM Runtime](12-gm-runtime.md) · [Roll Call](13-roll-call.md) · [Combat](14-combat.md) · [Realtime](15-realtime.md)
 
 ---
 
-[← Limites](08-limites.md) · [Índice](README.md)
+[← Realtime](15-realtime.md) · [Índice](README.md)

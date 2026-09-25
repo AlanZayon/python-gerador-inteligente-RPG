@@ -1,6 +1,6 @@
 # 10. Voz (STT / TTS)
 
-[← Operação](06-operacao.md) · [Índice](README.md)
+[← Operação](06-operacao.md) · [Índice](README.md) · [Seguinte: Play →](11-play-overview.md)
 
 ---
 

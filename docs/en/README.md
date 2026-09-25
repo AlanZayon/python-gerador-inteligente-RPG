@@ -88,8 +88,15 @@ flowchart TD
 | 8 | [Limits & roadmap](08-limits.md) | You want what is still unsolved |
 | 9 | [Glossary](09-glossary.md) | You want a short definition |
 | 10 | [Voice](10-voice.md) | You want ElevenLabs TTS, Audio Tags, and the VoiceDirector |
+| 11 | [Play — overview](11-play-overview.md) | You want Job → Campaign, Blueprint vs State, GameSession |
+| 12 | [Game Master Runtime](12-gm-runtime.md) | You want tools, authority, and private memory |
+| 13 | [Roll Call](13-roll-call.md) | You want the PC dice confirmation ritual |
+| 14 | [Combat tracker](14-combat.md) | You want the light tracker and BookIndex role |
+| 15 | [Realtime](15-realtime.md) | You want WebSocket, sync, and presence |
 
 Each chapter footer: **Previous · Index · Next**.
+
+**Interactive site:** [docs/site/](../site/index.html) (PT/EN, search, TOC).
 
 ---
 

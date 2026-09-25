@@ -88,8 +88,15 @@ flowchart TD
 | 8 | [Limites e roadmap](08-limites.md) | Quiser o que ainda não está resolvido |
 | 9 | [Glossário](09-glossario.md) | Quiser a definição de um termo |
 | 10 | [Voz](10-voz.md) | Quiser TTS ElevenLabs, Audio Tags e o VoiceDirector |
+| 11 | [Play — visão geral](11-play-overview.md) | Quiser Job → Campaign, Blueprint vs State, GameSession |
+| 12 | [Game Master Runtime](12-gm-runtime.md) | Quiser tools, autoridade e memória privada |
+| 13 | [Roll Call](13-roll-call.md) | Quiser o ritual de confirmação de dados do PC |
+| 14 | [Combat tracker](14-combat.md) | Quiser o tracker leve e o papel do BookIndex |
+| 15 | [Realtime](15-realtime.md) | Quiser WebSocket, sync e presença |
 
 Navegação em cada capítulo: **Anterior · Índice · Seguinte** no rodapé.
+
+**Site interativo:** [docs/site/](../site/index.html) (PT/EN, busca, TOC).
 
 ---
 

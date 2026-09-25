@@ -1,8 +1,18 @@
 # Documentação do sistema
 
-Backend que transforma **PDFs de livros de regras de RPG** em campanhas jogáveis em Markdown.
+Backend que transforma **PDFs de livros de regras de RPG** em campanhas jogáveis em Markdown, e corre a mesa com **Game Master Runtime** (Play).
 
-| Idioma | Comece aqui |
+## Site interativo
+
+**[site/index.html](site/index.html)** — documentação HTML (PT/EN, busca ⌘K, TOC, diagramas Mermaid, capítulos de Play/GM).
+
+```bash
+# na raiz do repositório
+python -m http.server 8080
+# http://localhost:8080/docs/site/
+```
+
+| Idioma | Comece aqui (Markdown) |
 |---|---|
 | Português | **[pt/README.md](pt/README.md)** — fluxo completo em uma página |
 | English | **[en/README.md](en/README.md)** — full flow on one page |
@@ -17,21 +27,13 @@ Backend que transforma **PDFs de livros de regras de RPG** em campanhas jogávei
 ```
 docs/
 ├── README.md              ← você está aqui
+├── site/                  ← site HTML interativo (abra index.html via http.server)
 ├── evidence/              ← ficheiros de apoio (opcional)
 ├── pt/                    ← manual em português
-│   ├── README.md          ← COMECE AQUI
-│   ├── 01-arquitetura.md
-│   ├── 02-job.md
-│   ├── 03-rag.md
-│   ├── 04-pipeline.md
-│   ├── 05-api.md
-│   ├── 06-operacao.md
-│   ├── 07-avaliacao.md
-│   ├── 08-limites.md
-│   ├── 09-glossario.md
-│   └── 10-voz.md
+│   ├── README.md          ← COMECE AQUI (Markdown)
+│   ├── 01-arquitetura.md … 10-voz.md
+│   └── 11-play-overview.md … 15-realtime.md
 └── en/                    ← same structure in English
-    └── 10-voice.md
 ```
 
 PDFs de livros e campanhas geradas em `examples/eval_runs/` ficam no disco local e **não** entram no git.

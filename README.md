@@ -14,8 +14,15 @@ HTTP client → Flask API → Redis queue → worker.py → S3 + 9router
 - **Worker** (`worker.py`) — consumes priority/standard queues, runs pipeline
 - **Tasks** (`tasks/campaign_tasks.py`) — PDF → RAG → plan/write/revise → Markdown → S3
 
-**Documentation:** [docs/README.md](docs/README.md)  
-Start with the full flow: [Portuguese](docs/pt/README.md) · [English](docs/en/README.md)
+**Documentation (interactive):** [docs/site/index.html](docs/site/index.html) — PT/EN, search, sidebar, Play/GM chapters.
+
+```bash
+# from the repo root (file:// cannot fetch Markdown)
+python -m http.server 8080
+# open http://localhost:8080/docs/site/
+```
+
+Markdown source: [docs/README.md](docs/README.md) · [Portuguese](docs/pt/README.md) · [English](docs/en/README.md)
 
 ## Quick start (local)
 
