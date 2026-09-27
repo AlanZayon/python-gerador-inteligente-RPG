@@ -33,7 +33,10 @@ TOOL_SPECS = [
             "The targeted Player must confirm before the server RNG resolves. "
             "Never use roll_dice or perform_check for a PC check. "
             "If the Player may choose between two checks, pass alternatives "
-            "[{skill, notation, dc}] — do not mash 'or'/'ou' into skill."
+            "[{skill, notation, dc}] — do not mash 'or'/'ou' into skill. "
+            "Attack/damage Roll Calls are rejected (combat_required) unless a "
+            "Combat Encounter is active, and (initiative_required) until the "
+            "acting Combatant has initiative. Initiative rolls are always allowed."
         ),
         "parameters": {
             "skill": "string skill or check name",
@@ -99,9 +102,13 @@ TOOL_SPECS = [
     {
         "name": "begin_combat",
         "description": (
-            "Start a light Combat Encounter tracker. Pass NPCs as a list of "
-            "{name, side, hp, max_hp}. Party PCs are added automatically when "
-            "claimed. Call lookup_rules for initiative/attack procedures first. "
+            "Start a light Combat Encounter tracker. Required as soon as violence "
+            "against a creature is declared (PC attacks, NPC attacks the party, or "
+            "the table joins a fight) — before any attack or damage roll. "
+            "Not for threats without a blow, attacking objects, practice, or surrender. "
+            "Pass NPCs as a list of {name, side, hp, max_hp}. Party PCs are added "
+            "automatically when claimed. Call lookup_rules for initiative/attack "
+            "procedures first; after this, roll initiative, then attacks on turn. "
             "Does not roll dice or resolve hits."
         ),
         "parameters": {
@@ -527,6 +534,44 @@ def resolve_roll_call(
     return out
 
 
+def _combat_roll_gate(ctx: ToolContext, character_id: str, args: dict) -> dict | None:
+    """Initiative-first: attack/damage Roll Calls need an active encounter + initiative."""
+    from services.play.gm.combat import (
+        combat_is_active,
+        combatant_for_character,
+        looks_like_attack_or_damage_roll,
+    )
+
+    reason = args.get("reason") or ""
+    skills = [args.get("skill") or ""]
+    alts = args.get("alternatives")
+    if isinstance(alts, list):
+        skills.extend((a or {}).get("skill") or "" for a in alts if isinstance(a, dict))
+    if not any(looks_like_attack_or_damage_roll(s, reason) for s in skills):
+        return None
+    if not combat_is_active(ctx.state):
+        return {
+            "ok": False,
+            "error": "combat_required",
+            "message": (
+                "No active Combat Encounter. Call lookup_rules for initiative, then "
+                "begin_combat with the hostile NPCs, then request initiative rolls. "
+                "Attack only after initiative is set."
+            ),
+        }
+    combatant = combatant_for_character(ctx.state, character_id)
+    if combatant and combatant.get("initiative") in (None, ""):
+        return {
+            "ok": False,
+            "error": "initiative_required",
+            "message": (
+                f"{combatant.get('name') or 'This Combatant'} has no initiative yet. "
+                "Request an initiative roll and set_combatant_initiative first."
+            ),
+        }
+    return None
+
+
 def execute_tool(ctx: ToolContext, name: str, args: dict) -> dict:
     args = args or {}
     if name == "lookup_rules":
@@ -551,6 +596,8 @@ def execute_tool(ctx: ToolContext, name: str, args: dict) -> dict:
                 out = {"ok": False, "error": "character_id required"}
             elif not _character_claimed_in_session(ctx, character_id):
                 out = {"ok": False, "error": "character is not claimed in this session"}
+            elif gate := _combat_roll_gate(ctx, character_id, args):
+                out = gate
             else:
                 rule = (args.get("success_rule") or "meet_or_beat").strip()
                 if rule not in {"meet_or_beat", "roll_under"}:

@@ -109,6 +109,9 @@ class LiveGMLLM:
                     "Write short public narration for the table. "
                     "If a Roll Call is pending, speak the call as the GM: name the Character, "
                     "the skill, the dice, and the DC. "
+                    "If request_roll failed with combat_required or initiative_required, "
+                    "do not narrate the attack's outcome: describe violence erupting and "
+                    "that initiative comes next. "
                     "Do not write stage directions, asterisks, or 'waiting for the player'."
                 ),
             }
@@ -195,12 +198,26 @@ class LiveGMLLM:
             "Never write stage directions such as 'waiting for the player', "
             "'aguardando a rolagem', asterisks, or parenthetical asides about waiting. "
             "Hidden GM/NPC rolls may use roll_dice immediately. "
-            "Light Combat Encounter tracker: when a fight starts, call lookup_rules "
-            "for initiative/attack/damage procedures from the uploaded book, then "
-            "begin_combat. Set initiative with set_combatant_initiative using server "
-            "dice totals. Narrate whose turn it is from campaign_state.combat. "
-            "After a resolved beat call next_turn. Never invent HP — use apply_harm "
-            "or apply_heal after dice. Call end_combat when the fight ends. "
+            "Light Combat Encounter tracker (initiative first). START combat with "
+            "begin_combat whenever campaign_state.combat is null and violence against a "
+            "creature is declared or answered: a PC attacks, strikes, shoots, or casts "
+            "harm at an NPC/creature; an NPC attacks the party; or the table joins a fight. "
+            "Do NOT start combat for threats or intimidation without a blow, drawing a "
+            "weapon without attacking, hitting objects (doors, locks, dummies), practice "
+            "or sparring, a PC who surrenders, or exploration checks with no hostile target. "
+            "Mandatory ORDER: (1) lookup_rules for initiative/attack/damage procedures from "
+            "the uploaded book, (2) begin_combat naming the hostile NPCs, (3) initiative — "
+            "request_roll for each PC one at a time and roll_dice for NPCs, then "
+            "set_combatant_initiative with the server totals, (4) narrate whose turn it is, "
+            "(5) only then attack/damage rolls on that Combatant's turn. Never resolve a "
+            "fight with a single out-of-combat attack roll, and never narrate capture, "
+            "restraint, knockout, or death as the outcome of an attack while combat is "
+            "null. If request_roll returns combat_required or initiative_required, "
+            "follow the ORDER instead of narrating the attack. When combat_policy is "
+            "present in the input, obey it. Narrate whose turn it is from "
+            "campaign_state.combat. After a resolved beat call next_turn. Never invent "
+            "HP — use apply_harm or apply_heal after dice. Call end_combat when the "
+            "fight ends (foes defeated, fled, or surrendered). "
             "Keep public narration concise and in-world. "
             "Do not decide a PC's voluntary actions. "
             "Never narrate your planning ('I am reading…', 'I'll prepare…') — "
@@ -225,7 +242,11 @@ class LiveGMLLM:
             system += (
                 " This is ROLL RESOLUTION. resolved_roll is authoritative. "
                 "Narrate success or failure for the table. "
-                "You may update_world_state. Do not call request_roll."
+                "You may update_world_state. Do not call request_roll. "
+                "If resolved_roll was an attack and campaign_state.combat is null, do not "
+                "end the fight with capture, restraint, knockout, or death: if hostilities "
+                "continue, call lookup_rules and begin_combat and hand off to initiative. "
+                "A PC who explicitly surrendered is a non-combat beat."
             )
         party = context.get("party") or []
         brief = context.get("opening_brief") or {}
@@ -261,6 +282,8 @@ class LiveGMLLM:
             "campaign_start_hook": (brief.get("start_hook") or "")[:400],
             "rules_excerpts": rules_block,
         }
+        if context.get("combat_policy"):
+            user["combat_policy"] = context["combat_policy"]
         return [
             {"role": "system", "content": system},
             {"role": "user", "content": json.dumps(user, ensure_ascii=False)},

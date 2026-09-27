@@ -12,6 +12,7 @@ from models.entities import Campaign, CampaignCharacter, GameSession, Job, Sessi
 from services.play import hub as hub_module
 from services.play.events import event_to_envelope
 from services.play.gm.agency import scrub_unsolicited_pc_actions
+from services.play.gm.combat import combat_is_active, combat_policy_for_turn
 from services.play.gm.errors import ActionError
 from services.play.gm.live_llm import MAX_TOOL_ROUNDS, validate_tool_calls
 from services.play.gm.provider import resolve_gm_llm
@@ -28,7 +29,10 @@ from services.play.memory import (
 logger = logging.getLogger(__name__)
 
 LOOKUP_TOOLS = {"lookup_rules"}
+# Run alongside a rules lookup instead of being dropped for the follow-up round.
+EARLY_TOOLS = {"begin_combat"}
 IMMEDIATE_PC_DICE = {"roll_dice", "perform_check"}
+COMBAT_GATE_ERRORS = {"combat_required", "initiative_required"}
 
 
 def _needs_table_narration(text: str, has_tools: bool) -> bool:
@@ -115,9 +119,23 @@ def _run_tool_loop(
         can_continue = lookups and round_i < MAX_TOOL_ROUNDS - 1 and hasattr(llm, "continue_with_tools")
         if can_continue:
             lookup_results = []
-            for call in lookups:
+            for call in lookups + [c for c in others if c["name"] in EARLY_TOOLS]:
                 _run_one_tool(ctx, call, request_id, session_id)
                 lookup_results.append(ctx.tool_results[-1])
+            for call in others:
+                if call["name"] in EARLY_TOOLS:
+                    continue
+                lookup_results.append(
+                    {
+                        "id": call.get("id"),
+                        "name": call["name"],
+                        "result": {
+                            "ok": False,
+                            "error": "deferred",
+                            "message": "Not executed. Re-issue after reading the rules.",
+                        },
+                    }
+                )
             try:
                 turn = llm.continue_with_tools(context, lookup_results)
             except Exception:
@@ -128,10 +146,24 @@ def _run_tool_loop(
             others = [c for c in others if c["name"] != "request_roll"]
         if any(c["name"] == "request_roll" for c in others):
             others = [c for c in others if c["name"] not in IMMEDIATE_PC_DICE]
+        executed = []
         for call in lookups + others:
             _run_one_tool(ctx, call, request_id, session_id)
+            executed.append(ctx.tool_results[-1])
+        gated = any(_is_combat_gate(tr) for tr in executed)
+        if gated and round_i < MAX_TOOL_ROUNDS - 1 and hasattr(llm, "continue_with_tools"):
+            try:
+                turn = llm.continue_with_tools(context, executed)
+            except Exception:
+                logger.exception("gm_continue_with_tools_failed session_id=%s", session_id)
+                break
+            continue
         break
     return turn
+
+
+def _is_combat_gate(tool_result: dict) -> bool:
+    return (tool_result.get("result") or {}).get("error") in COMBAT_GATE_ERRORS
 
 
 def run_gm_flight(
@@ -256,6 +288,12 @@ def run_gm_flight(
             "book_id": campaign.book_id if campaign else None,
             "rules_excerpts": rules_excerpts,
             "resolved_roll": resolved_roll,
+            "combat_policy": combat_policy_for_turn(
+                purpose=purpose,
+                player_action=player_action,
+                state=state,
+                resolved_roll=resolved_roll,
+            ),
             # GM continuity: all scopes including others' private knowledge
             "memories_gm": memories_gm,
             # Player-facing filtered layer (no other Characters' private knowledge)
@@ -284,7 +322,10 @@ def run_gm_flight(
         narration = (turn.narration or "").strip()
         speaker = getattr(turn, "speaker", None) or "gm"
         voice_direction = getattr(turn, "voice_direction", None)
-        if _needs_table_narration(narration, bool(ctx.tool_results)) and hasattr(
+        combat_gated = any(_is_combat_gate(tr) for tr in ctx.tool_results) and not (
+            combat_is_active(ctx.state)
+        )
+        if (combat_gated or _needs_table_narration(narration, bool(ctx.tool_results))) and hasattr(
             llm, "narrate_after_tools"
         ):
             follow = llm.narrate_after_tools(
@@ -292,7 +333,9 @@ def run_gm_flight(
                 ctx.tool_results,
             )
             if follow and (
-                has_wait_meta(narration) or len(follow.strip()) >= len(narration)
+                combat_gated
+                or has_wait_meta(narration)
+                or len(follow.strip()) >= len(narration)
             ):
                 narration = follow.strip()
                 if getattr(llm, "last_speaker", None):

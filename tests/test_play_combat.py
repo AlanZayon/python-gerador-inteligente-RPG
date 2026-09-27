@@ -12,7 +12,15 @@ from sqlalchemy.pool import StaticPool
 from database import Base
 from models.entities import Campaign, CampaignCharacter, Job, User
 from services.play.gm import ActionError, MockGMLLM, confirm_roll, submit_player_action
-from services.play.gm.combat import current_combatant, ordered_combatants
+from services.play.gm.combat import (
+    combat_policy_for_turn,
+    current_combatant,
+    looks_like_attack_or_damage_roll,
+    looks_like_hostile_violence,
+    looks_like_initiative_roll,
+    ordered_combatants,
+)
+from services.play.gm.live_llm import LiveGMLLM
 from services.play.gm.mock_llm import LLMTurn
 from services.play.gm.rag_context import build_gm_query
 from services.play.gm.state import dump_state, load_state
@@ -370,3 +378,216 @@ def test_pc_attack_roll_then_harm(live_table):
     # Turn advanced to Bandit
     current = current_combatant(result["state"]["combat"])
     assert current["name"] == "Bandit"
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "I attack the dwarf",
+        "I swing at the bandit",
+        "Ataco o guarda anão com minha espada",
+        "Dou um golpe no guarda",
+        "Atiro uma flecha contra o orc",
+    ],
+)
+def test_hostile_violence_detected(text):
+    assert looks_like_hostile_violence(text)
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "I hit the door",
+        "Chuto a porta",
+        "Treino com o boneco",
+        "Me rendo aos guardas",
+        "Não ataco o guarda",
+        "Converso com o anão sobre a sociedade",
+        "Pego uma flecha da aljava",
+        "Entro na mata",
+    ],
+)
+def test_non_combat_actions_not_flagged(text):
+    assert not looks_like_hostile_violence(text)
+
+
+def test_roll_classification():
+    assert looks_like_attack_or_damage_roll("Força (Ataque com Arma)")
+    assert looks_like_attack_or_damage_roll("Damage", "longsword")
+    assert not looks_like_attack_or_damage_roll("Destreza (Iniciativa)")
+    assert looks_like_initiative_roll("Initiative")
+    assert not looks_like_attack_or_damage_roll("Força (Atletismo)", "escalar o muro")
+
+
+def test_combat_policy_only_when_combat_inactive():
+    policy = combat_policy_for_turn(
+        purpose="gm_turn", player_action="I attack the dwarf", state={"combat": None}
+    )
+    assert policy and policy["hostile_violence_detected"]
+    assert policy["required_order"][:2] == ["lookup_rules", "begin_combat"]
+    active = {"combat": {"status": "active", "combatants": []}}
+    assert combat_policy_for_turn(
+        purpose="gm_turn", player_action="I attack the dwarf", state=active
+    ) is None
+    assert combat_policy_for_turn(
+        purpose="gm_turn", player_action="I look around", state={"combat": None}
+    ) is None
+    resolved = combat_policy_for_turn(
+        purpose="roll_resolution",
+        player_action="",
+        state={"combat": None},
+        resolved_roll={"skill": "Força (Ataque com Arma)"},
+    )
+    assert resolved and resolved["attack_resolved_outside_combat"]
+
+
+def test_live_prompt_includes_combat_policy():
+    llm = LiveGMLLM(chat_fn=lambda **_: {})
+    policy = {"combat_active": False, "hostile_violence_detected": True}
+    messages = llm._build_messages(
+        {"purpose": "gm_turn", "player_action": "I attack", "combat_policy": policy}
+    )
+    user = json.loads(messages[1]["content"])
+    assert user["combat_policy"] == policy
+    assert "initiative first" in messages[0]["content"].lower()
+    assert "combat_policy" not in json.loads(
+        llm._build_messages({"purpose": "gm_turn", "player_action": "I look"})[1]["content"]
+    )
+
+
+class _AttackFirstLLM:
+    """Issues an attack Roll Call without opening combat (the bug we gate)."""
+
+    def __init__(self):
+        self.contexts: list[dict] = []
+
+    def complete_turn(self, context: dict) -> LLMTurn:
+        self.contexts.append(context)
+        return LLMTurn(
+            tool_calls=[
+                {
+                    "name": "request_roll",
+                    "args": {
+                        "skill": "Força (Ataque com Arma)",
+                        "notation": "1d20+5",
+                        "dc": 14,
+                        "reason": "golpear o guarda anão",
+                    },
+                }
+            ],
+            narration="Você avança contra o guarda.",
+        )
+
+    def narrate_after_tools(self, context: dict, tool_results: list[dict]) -> str:
+        return "A violência explode no portão — iniciativa!"
+
+
+def test_attack_roll_without_combat_is_rejected(live_table):
+    llm = _AttackFirstLLM()
+    result = submit_player_action(
+        live_table["host"].id,
+        live_table["session_id"],
+        "Ataco o guarda anão",
+        llm=llm,
+    )
+    gate = next(t for t in result["tool_results"] if t["name"] == "request_roll")
+    assert gate["result"]["error"] == "combat_required"
+    assert result["state"]["pending_check"] is None
+    assert result["narration"] == "A violência explode no portão — iniciativa!"
+    assert llm.contexts[0]["combat_policy"]["hostile_violence_detected"] is True
+
+
+def test_initiative_roll_allowed_without_combat(live_table):
+    class _InitLLM(_AttackFirstLLM):
+        def complete_turn(self, context):
+            return LLMTurn(
+                tool_calls=[
+                    {
+                        "name": "request_roll",
+                        "args": {"skill": "Iniciativa", "notation": "1d20+2", "reason": "luta"},
+                    }
+                ],
+                narration="Mira, role iniciativa, 1d20+2.",
+            )
+
+    result = submit_player_action(
+        live_table["host"].id, live_table["session_id"], "I draw steel", llm=_InitLLM()
+    )
+    assert result["state"]["pending_check"]["skill"] == "Iniciativa"
+
+
+def test_attack_before_own_initiative_is_rejected(live_table):
+    submit_player_action(
+        live_table["host"].id,
+        live_table["session_id"],
+        "GM_SCRIPT:begin_combat",
+        llm=MockGMLLM(),
+        retrieve_fn=_combat_retrieve,
+    )
+    result = submit_player_action(
+        live_table["host"].id,
+        live_table["session_id"],
+        "Ataco o bandido",
+        llm=_AttackFirstLLM(),
+    )
+    gate = next(t for t in result["tool_results"] if t["name"] == "request_roll")
+    assert gate["result"]["error"] == "initiative_required"
+    assert result["state"]["pending_check"] is None
+
+
+class _RecoveringLLM:
+    """Attacks first, then follows the gate: lookup+begin_combat, then initiative."""
+
+    def __init__(self):
+        self.rounds = 0
+
+    def complete_turn(self, context: dict) -> LLMTurn:
+        return _AttackFirstLLM().complete_turn(context)
+
+    def continue_with_tools(self, context: dict, tool_results: list[dict]) -> LLMTurn:
+        self.rounds += 1
+        if self.rounds == 1:
+            assert any(
+                (t.get("result") or {}).get("error") == "combat_required" for t in tool_results
+            )
+            return LLMTurn(
+                tool_calls=[
+                    {"name": "lookup_rules", "args": {"query": "initiative attack damage"}},
+                    {
+                        "name": "begin_combat",
+                        "args": {"npcs": [{"name": "Guarda Anão", "hp": 11, "max_hp": 11}]},
+                    },
+                    {"name": "request_roll", "args": {"skill": "Força (Ataque)"}},
+                ],
+                narration="",
+            )
+        return LLMTurn(
+            tool_calls=[
+                {
+                    "name": "request_roll",
+                    "args": {"skill": "Iniciativa", "notation": "1d20+2", "reason": "combate"},
+                }
+            ],
+            narration="O guarda saca o machado. Mira, role iniciativa, 1d20+2.",
+        )
+
+    def narrate_after_tools(self, context: dict, tool_results: list[dict]) -> str:
+        return "O guarda saca o machado. Mira, role iniciativa, 1d20+2."
+
+
+def test_gate_feeds_back_and_model_opens_combat(live_table):
+    llm = _RecoveringLLM()
+    result = submit_player_action(
+        live_table["host"].id,
+        live_table["session_id"],
+        "Ataco o guarda anão",
+        llm=llm,
+        retrieve_fn=_combat_retrieve,
+    )
+    combat = result["state"]["combat"]
+    assert combat and combat["status"] == "active"
+    assert any(c["name"] == "Guarda Anão" for c in combat["combatants"])
+    # begin_combat ran alongside lookup_rules; the bundled attack was deferred
+    names = [t["name"] for t in result["tool_results"]]
+    assert names.count("begin_combat") == 1
+    assert result["state"]["pending_check"]["skill"] == "Iniciativa"

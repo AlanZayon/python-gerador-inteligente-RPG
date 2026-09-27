@@ -3,8 +3,118 @@
 from __future__ import annotations
 
 import json
+import re
+import unicodedata
 import uuid
 from typing import Any
+
+# Cue lists are matched against accent-stripped lowercase text (EN + PT).
+_VIOLENCE_VERBS = (
+    r"attack\w*|strike|strikes|striking|struck|stab\w*|slash\w*|shoot\w*|shot|"
+    r"punch\w*|kick\w*|swing\w* at|charg\w* at|lunge\w* at|fire\w* at|"
+    r"hit|hits|hitting|smash\w*|kill|kills|killing|murder\w*|fight|fights|fighting|"
+    r"assault\w*|"
+    r"atac\w*|golpe\w*|desfer\w*|esfaque\w*|apunhal\w*|flech(?:o|ar|ei|ou)|"
+    r"(?:atir|dispar)\w*(?: \w+){0,3} (?:em|no|na|nos|nas|contra)|"
+    r"soc(?:o|a|ar|ei|ou|amos)|chut(?:o|a|ar|ei|ou|amos)|"
+    r"invist\w* contra|invest\w* contra|parto pra cima|partir pra cima|"
+    r"lut(?:o|a|ar|amos|ei|ou)|brig(?:o|a|ar|amos|ou)|"
+    r"mat(?:ar|amos|ei|ou)|ferir|firo|fere|feri|estoc(?:o|a|ar|ada)"
+)
+_VIOLENCE_RE = re.compile(rf"\b(?:{_VIOLENCE_VERBS})\b")
+_NEGATED_RE = re.compile(
+    rf"\b(?:nao|nunca|jamais|not|never|dont|don't|do not|won't|wont)\s+(?:\w+\s+)?(?:{_VIOLENCE_VERBS})\b"
+)
+_NON_COMBAT_TARGET_RE = re.compile(
+    r"\b(?:door|gate|wall|lock|chest|barrel|crate|bell|rock|tree|table|dummy|target practice|"
+    r"training|practice|sparring|spar|"
+    r"porta|portao|parede|fechadura|bau|barril|caixote|sino|pedra|arvore|mesa|boneco|"
+    r"alvo de treino|treino|treinar|pratica|praticar)\b"
+)
+_SURRENDER_RE = re.compile(
+    r"\b(?:surrender\w*|yield\w*|give up|me rendo|rendo|render|entrego|entregar|desisto)\b"
+)
+_ATTACK_ROLL_RE = re.compile(
+    r"\b(?:attack\w*|to hit|weapon|melee|ranged|damage|strike|"
+    r"ataque\w*|atacar|arma|corpo a corpo|a distancia|dano|golpe\w*|acerto)\b"
+)
+_INITIATIVE_RE = re.compile(r"\b(?:initiative|iniciativa)\b")
+
+
+def _fold(text: str | None) -> str:
+    raw = unicodedata.normalize("NFKD", text or "")
+    return "".join(ch for ch in raw if not unicodedata.combining(ch)).lower()
+
+
+def looks_like_hostile_violence(text: str | None) -> bool:
+    """Declared violence against a creature (not objects, practice, or surrender)."""
+    folded = _fold(text)
+    if not folded.strip() or not _VIOLENCE_RE.search(folded):
+        return False
+    if _NEGATED_RE.search(folded) or _SURRENDER_RE.search(folded):
+        return False
+    return not _NON_COMBAT_TARGET_RE.search(folded)
+
+
+def looks_like_initiative_roll(skill: str | None, reason: str | None = None) -> bool:
+    return bool(_INITIATIVE_RE.search(_fold(f"{skill or ''} {reason or ''}")))
+
+
+def looks_like_attack_or_damage_roll(skill: str | None, reason: str | None = None) -> bool:
+    if looks_like_initiative_roll(skill, reason):
+        return False
+    return bool(_ATTACK_ROLL_RE.search(_fold(f"{skill or ''} {reason or ''}")))
+
+
+def combat_policy_for_turn(
+    *,
+    purpose: str,
+    player_action: str,
+    state: dict | None,
+    resolved_roll: dict | None = None,
+) -> dict | None:
+    """Advisory for the GM when a beat looks like violence but no encounter exists."""
+    if combat_is_active(state):
+        return None
+    if purpose == "gm_turn" and looks_like_hostile_violence(player_action):
+        return {
+            "combat_active": False,
+            "hostile_violence_detected": True,
+            "required_order": [
+                "lookup_rules",
+                "begin_combat",
+                "initiative",
+                "then_attacks_on_turn",
+            ],
+            "forbid": (
+                "Do not request_roll attack/damage or narrate fight-ending capture "
+                "while combat is inactive. If this is not violence against a creature "
+                "(object, practice, surrender), ignore this policy."
+            ),
+        }
+    roll = resolved_roll or {}
+    if purpose == "roll_resolution" and looks_like_attack_or_damage_roll(
+        roll.get("skill"), roll.get("reason")
+    ):
+        return {
+            "combat_active": False,
+            "attack_resolved_outside_combat": True,
+            "forbid": (
+                "Do not end the fight with capture, restraint, knockout, or death. "
+                "If hostilities continue, lookup_rules then begin_combat and hand off "
+                "to initiative."
+            ),
+        }
+    return None
+
+
+def combatant_for_character(state: dict | None, character_id: str | None) -> dict | None:
+    if not character_id or not combat_is_active(state):
+        return None
+    for c in (state.get("combat") or {}).get("combatants") or []:
+        if c.get("character_id") == character_id:
+            return c
+    return None
 
 
 def empty_combatant(
