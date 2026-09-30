@@ -47,9 +47,11 @@ python worker.py               # terminal 2 — job consumer
 Use the included `Procfile`:
 
 ```
-web: gunicorn app:app --bind 0.0.0.0:$PORT --workers 2 --threads 4 --timeout 120
+web: gunicorn app:app --bind 0.0.0.0:$PORT --workers 1 --threads 8 --timeout 120
 worker: python worker.py
 ```
+
+Keep the web service at **one Gunicorn worker**: the GameSession WebSocket hub is in-process (ADR 0005). Install it with `pip install -r requirements-web.txt` (no `sentence-transformers`/PyTorch); the worker uses the full `requirements.txt`.
 
 1. Create **two services**: web (Gunicorn) + worker (`python worker.py`)
 2. Attach **PostgreSQL** (requires `psycopg2-binary` in requirements.txt)
