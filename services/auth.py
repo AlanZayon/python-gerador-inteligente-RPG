@@ -1,7 +1,9 @@
 """Authentication: Clerk JWT, API keys, dev mode."""
 
 import hashlib
+import logging
 import os
+from datetime import timedelta
 from functools import wraps
 
 import jwt
@@ -11,7 +13,12 @@ from flask import g, jsonify, request
 from database import SessionLocal
 from models.entities import User
 
+logger = logging.getLogger(__name__)
+
 _jwks_cache = None
+
+# Clerk session JWTs last ~60s; small clock skew between PC and Clerk is common.
+_JWT_LEEWAY = timedelta(seconds=int(os.getenv("CLERK_JWT_LEEWAY_SECONDS", "60")))
 
 
 def _get_api_keys() -> set[str]:
@@ -59,11 +66,13 @@ def _verify_clerk_token(token: str) -> dict | None:
     try:
         jwks = _get_jwks()
         if not jwks:
+            logger.warning("Clerk JWKS unavailable; cannot verify JWT")
             return None
         header = jwt.get_unverified_header(token)
         kid = header.get("kid")
         key = next((k for k in jwks.get("keys", []) if k.get("kid") == kid), None)
         if not key:
+            logger.warning("Clerk JWT kid not in JWKS: %s", kid)
             return None
         public_key = jwt.algorithms.RSAAlgorithm.from_jwk(key)
         issuer = os.getenv("CLERK_ISSUER")
@@ -72,10 +81,12 @@ def _verify_clerk_token(token: str) -> dict | None:
             public_key,
             algorithms=["RS256"],
             issuer=issuer,
+            leeway=_JWT_LEEWAY,
             options={"verify_aud": False},
         )
         return payload
-    except Exception:
+    except Exception as exc:
+        logger.warning("Clerk JWT verification failed: %s: %s", type(exc).__name__, exc)
         return None
 
 
