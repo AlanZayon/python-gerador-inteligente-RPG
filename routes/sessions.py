@@ -112,37 +112,48 @@ def ready(session_id: str):
 @require_user
 def start(session_id: str):
     try:
-        start_game_session(g.user.id, session_id)
-        gs = get_session_for_user(g.user.id, session_id)
+        _gs, opening = start_game_session(g.user.id, session_id)
+        gs = get_session_for_user(g.user.id, session_id) or _gs
     except SessionError as exc:
         return _error(exc)
 
-    opening_text = None
-    try:
-        import json as _json
-
-        from database import SessionLocal
-        from models.entities import GameEvent
-
-        db = SessionLocal()
+    opening = opening or {}
+    opening_text = opening.get("narration")
+    opening_audio = opening.get("audio")
+    if not opening_text:
         try:
-            ev = (
-                db.query(GameEvent)
-                .filter(
-                    GameEvent.game_session_id == session_id,
-                    GameEvent.type == "gm_narration",
+            import json as _json
+
+            from database import SessionLocal
+            from models.entities import GameEvent
+
+            db = SessionLocal()
+            try:
+                ev = (
+                    db.query(GameEvent)
+                    .filter(
+                        GameEvent.game_session_id == session_id,
+                        GameEvent.type == "gm_narration",
+                    )
+                    .order_by(GameEvent.seq.desc())
+                    .first()
                 )
-                .order_by(GameEvent.seq.desc())
-                .first()
-            )
-            if ev:
-                payload = _json.loads(ev.payload_json or "{}")
-                opening_text = payload.get("text")
-        finally:
-            db.close()
-    except Exception:
-        opening_text = None
-    return jsonify({"success": True, "session": session_to_dict(gs), "opening": opening_text})
+                if ev:
+                    payload = _json.loads(ev.payload_json or "{}")
+                    opening_text = payload.get("text")
+            finally:
+                db.close()
+        except Exception:
+            opening_text = None
+
+    return jsonify(
+        {
+            "success": True,
+            "session": session_to_dict(gs),
+            "opening": opening_text,
+            "audio": opening_audio,
+        }
+    )
 
 
 @sessions_bp.route("/<session_id>/end", methods=["POST"])

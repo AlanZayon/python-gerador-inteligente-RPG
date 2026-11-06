@@ -204,13 +204,19 @@ def deliver_session_opening(
                     ),
                 )
         except Exception:
+            logger.exception(
+                "Opening TTS failed request_id=%s session_id=%s",
+                request_id,
+                session_id,
+            )
             audio_dict = None
 
         logger.info(
-            "gm_opening request_id=%s session_id=%s provider=%s",
+            "gm_opening request_id=%s session_id=%s provider=%s has_audio=%s",
             request_id,
             session_id,
             observability.get("provider"),
+            bool(audio_dict),
         )
         db.refresh(gs)
         return {

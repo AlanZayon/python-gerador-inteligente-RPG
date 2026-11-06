@@ -11,7 +11,7 @@ from models.entities import Campaign, CampaignCharacter, Job
 
 logger = logging.getLogger(__name__)
 
-# Keep in sync with services.play.sessions.MAX_PLAYERS — table seats need claimable PCs.
+# Fallback seats only when the Job had no uploaded character sheets.
 MIN_CLAIMABLE_ROSTER = 4
 
 
@@ -34,9 +34,23 @@ def _parse_sheets(raw: str | None) -> list[dict[str, Any]]:
     return []
 
 
-def ensure_claimable_roster(db, campaign_id: str, minimum: int = MIN_CLAIMABLE_ROSTER) -> int:
-    """Pad Campaign with generic claimable PCs so 2–4 players can sit.
+def _sheet_display_name(sheet: dict[str, Any], index: int) -> str:
+    name = (sheet.get("name") or "").strip()
+    if name and name.lower() not in {"player character", "character", "pc"}:
+        return name
+    klass = (sheet.get("class") or "").strip()
+    level = sheet.get("level")
+    if klass and level not in (None, ""):
+        return f"{klass} {level}"
+    if klass:
+        return klass
+    return f"Character {index + 1}"
 
+
+def ensure_claimable_roster(db, campaign_id: str, minimum: int = MIN_CLAIMABLE_ROSTER) -> int:
+    """Pad with generic PCs only when the roster is empty (no uploaded sheets).
+
+    If the Campaign already has characters from sheets, leave them as-is.
     Returns how many characters were added.
     """
     existing = (
@@ -45,10 +59,12 @@ def ensure_claimable_roster(db, campaign_id: str, minimum: int = MIN_CLAIMABLE_R
         .order_by(CampaignCharacter.sort_order)
         .all()
     )
+    if existing:
+        return 0
     added = 0
-    next_order = (existing[-1].sort_order + 1) if existing else 0
-    while len(existing) + added < minimum:
-        idx = len(existing) + added + 1
+    next_order = 0
+    while added < minimum:
+        idx = added + 1
         db.add(
             CampaignCharacter(
                 campaign_id=campaign_id,
@@ -122,19 +138,23 @@ def create_campaign_from_job(user_id: str, job_id: str) -> Campaign:
         db.add(campaign)
         db.flush()
 
-        for i, sheet in enumerate(_parse_sheets(job.character_sheets)):
-            name = (sheet.get("name") or f"Character {i + 1}").strip() or f"Character {i + 1}"
+        sheets = _parse_sheets(job.character_sheets)
+        for i, sheet in enumerate(sheets):
             db.add(
                 CampaignCharacter(
                     campaign_id=campaign.id,
-                    display_name=name,
+                    display_name=_sheet_display_name(sheet, i),
                     sheet_json=json.dumps(sheet, ensure_ascii=False),
                     sort_order=i,
                     claimable=True,
                 )
             )
 
-        ensure_claimable_roster(db, campaign.id)
+        # SessionLocal uses autoflush=False — flush so the pad query sees sheet rows.
+        db.flush()
+        # Only invent generic seats when the host did not upload sheets.
+        if not sheets:
+            ensure_claimable_roster(db, campaign.id)
         db.commit()
         db.refresh(campaign)
         logger.info("Created Campaign %s from Job %s", campaign.id, job_id)

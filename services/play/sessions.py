@@ -61,7 +61,22 @@ def create_game_session(user_id: str, campaign_id: str) -> GameSession:
         )
         if existing:
             # Host reopening the table — return the live session instead of 409.
-            return existing
+            if not _get_membership(db, existing.id, user_id):
+                db.add(
+                    SessionPlayer(
+                        game_session_id=existing.id,
+                        user_id=user_id,
+                        role="host",
+                        ready=False,
+                        connected=True,
+                    )
+                )
+                db.commit()
+            # Re-load after close-safe identity: avoid returning an expired instance.
+            sid = existing.id
+            gs = db.query(GameSession).filter(GameSession.id == sid).first()
+            db.expunge(gs)
+            return gs
 
         code = _invite_code()
         while db.query(GameSession).filter(GameSession.invite_code == code).first():
@@ -261,7 +276,8 @@ def set_ready(user_id: str, session_id: str, ready: bool = True) -> SessionPlaye
         db.close()
 
 
-def start_game_session(user_id: str, session_id: str) -> GameSession:
+def start_game_session(user_id: str, session_id: str) -> tuple[GameSession, dict | None]:
+    """Start lobby → ACTIVE. Returns (session, opening_result|None)."""
     db = SessionLocal()
     try:
         gs = db.query(GameSession).filter(GameSession.id == session_id).first()
@@ -302,14 +318,15 @@ def start_game_session(user_id: str, session_id: str) -> GameSession:
         hub_module.default_hub.publish(envelope["session_id"], envelope)
         db.refresh(gs)
 
+        opening: dict | None = None
         try:
             from services.play.gm.opening import deliver_session_opening
 
-            deliver_session_opening(session_id)
+            opening = deliver_session_opening(session_id)
         except Exception:
             logger.exception("Session opening narration failed for %s", session_id)
 
-        return gs
+        return gs, opening
     except SessionError:
         db.rollback()
         raise

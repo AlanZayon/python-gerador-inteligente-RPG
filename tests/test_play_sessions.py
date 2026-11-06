@@ -186,7 +186,7 @@ def test_start_requires_two_to_four_claimed_players(db_setup):
     chars = _chars(Session, campaign.id)
 
     with pytest.raises(SessionError) as exc:
-        start_game_session(host.id, gs.id)
+        start_game_session(host.id, gs.id)[0]
     assert exc.value.code == "not_ready"
 
     join_game_session(p2.id, gs.invite_code)
@@ -195,7 +195,7 @@ def test_start_requires_two_to_four_claimed_players(db_setup):
     set_ready(host.id, gs.id, True)
     set_ready(p2.id, gs.id, True)
 
-    started = start_game_session(host.id, gs.id)
+    started = start_game_session(host.id, gs.id)[0]
     assert started.status == "ACTIVE"
     db = Session()
     from models.entities import GameEvent
@@ -230,10 +230,10 @@ def test_non_host_cannot_start_or_end(db_setup):
     set_ready(p2.id, gs.id, True)
 
     with pytest.raises(SessionError) as exc:
-        start_game_session(p2.id, gs.id)
+        start_game_session(p2.id, gs.id)[0]
     assert exc.value.code == "forbidden"
 
-    start_game_session(host.id, gs.id)
+    start_game_session(host.id, gs.id)[0]
     with pytest.raises(SessionError):
         end_game_session(p2.id, gs.id)
     ended = end_game_session(host.id, gs.id)

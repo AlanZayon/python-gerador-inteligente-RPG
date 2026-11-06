@@ -102,7 +102,7 @@ def live_table(monkeypatch):
     claim_character(p2.id, gs.id, chars[1].id)
     set_ready(host.id, gs.id, True)
     set_ready(p2.id, gs.id, True)
-    start_game_session(host.id, gs.id)
+    start_game_session(host.id, gs.id)[0]
 
     payload = {
         "Session": Session,

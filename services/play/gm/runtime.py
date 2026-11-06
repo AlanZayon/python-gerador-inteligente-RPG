@@ -440,6 +440,7 @@ def run_gm_flight(
                     )
             except Exception:
                 # Text-first: voice failure must not roll back Campaign State.
+                logger.exception("GM TTS failed session_id=%s", session_id)
                 audio_dict = None
 
         db.refresh(gs)
